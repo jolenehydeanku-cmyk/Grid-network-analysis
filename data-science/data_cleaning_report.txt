@@ -1,0 +1,61 @@
+======================================================================
+TASK 1.1 — DATA CLEANING REPORT
+======================================================================
+
+--- Shapes ---
+utilities:   (10, 7)
+substations: (44, 12)
+lines:       (55, 11)
+
+--- Missing values (before cleaning) ---
+utilities: no missing values
+substations: no missing values
+lines: no missing values
+
+--- Enforcing numeric types ---
+
+--- Duplicate rows ---
+utilities:   0
+substations: 0
+lines:       0
+utilities: 0 duplicate 'Utility ID' value(s)
+substations: 0 duplicate 'Substation ID' value(s)
+lines: 0 duplicate 'Line ID' value(s)
+
+--- Referential integrity checks ---
+Lines with an unknown Source Substation ID: 0
+Lines with an unknown Destination Substation ID: 0
+Lines with an unknown Utility ID: 0
+Self-loop lines (source == destination): 0
+
+--- Coordinate bounds check (West Africa: lat 4-25, lon -18 to 15) ---
+Substations with out-of-range coordinates: 0
+
+--- Categorical value checks ---
+substations['Status'] values: ['Active', 'Inactive']
+substations['Type'] values: ['Bulk Supply Point', 'Distribution', 'Transmission']
+lines['Status'] values: ['Active', 'Under Maintenance']
+lines['Line Type'] values: ['Overhead', 'Underground']
+substations['Voltage (kV)'] values: [np.int64(11), np.int64(33), np.int64(69), np.int64(161), np.int64(330)]
+
+--- Basic statistics: substations ---
+        Latitude  Longitude  Voltage (kV)  Capacity (MVA)  Commissioning Year
+count  44.000000  44.000000     44.000000       44.000000           44.000000
+mean    6.898402  -1.194868    134.545455      157.865909         1996.295455
+std     1.879404   2.314917    120.399810      139.923148           16.112366
+min     4.874700 -13.580000     11.000000        6.400000         1967.000000
+25%     5.586350  -1.760000     33.000000       43.825000         1982.250000
+50%     6.184400  -0.800700     69.000000      108.550000         1999.500000
+75%     7.364200  -0.170900    161.000000      254.350000         2009.250000
+max    11.200000   2.430000    330.000000      487.600000         2022.000000
+
+--- Basic statistics: lines ---
+       Voltage (kV)  Length (km)  Capacity (MVA)
+count     55.000000    55.000000       55.000000
+mean     141.381818    99.312727      222.400000
+std      135.169097    90.275104      109.181765
+min       11.000000     3.800000       32.900000
+25%       22.000000    42.900000      134.550000
+50%       69.000000    75.900000      229.900000
+75%      330.000000   129.600000      292.100000
+max      330.000000   426.000000      506.300000
