@@ -1,0 +1,41 @@
+Column,Data Type,Example Value
+Line ID,int64,1
+Utility ID,int64,2
+Source Substation ID,int64,1
+Source Substation,str,Achimota Substation
+Destination Substation ID,int64,2
+Destination Substation,str,Tema Substation
+Voltage (kV),int64,11
+Length (km),float64,25.2
+Capacity (MVA),float64,215.0
+Status,str,Active
+Line Type,str,Underground
+Substation ID_Source,int64,1
+Name_Source,str,Achimota Substation
+Short Name_Source,str,Achimota
+Region_Source,str,Greater Accra
+Country_Source,str,Ghana
+Latitude_Source,float64,5.6085
+Longitude_Source,float64,-0.2193
+Voltage (kV)_Source,int64,11
+Capacity (MVA)_Source,float64,6.4
+Type_Source,str,Distribution
+Status_Source,str,Active
+Substation ID_Dest,int64,2
+Name_Dest,str,Tema Substation
+Short Name_Dest,str,Tema
+Region_Dest,str,Greater Accra
+Country_Dest,str,Ghana
+Latitude_Dest,float64,5.6596
+Longitude_Dest,float64,-0.0226
+Voltage (kV)_Dest,int64,330
+Capacity (MVA)_Dest,float64,48.5
+Type_Dest,str,Transmission
+Status_Dest,str,Active
+Utility ID_Utility,int64,2
+Name_Utility,str,Northern Electricity Distribution Company
+Alias_Utility,str,NEDCo
+Code_Utility,str,NED
+Type_Utility,str,Distribution
+Country_Utility,str,Ghana
+Active_Utility,str,Y
