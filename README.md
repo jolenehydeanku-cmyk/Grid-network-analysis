@@ -33,7 +33,7 @@ python task1_1_clean_data.py    # cleans + validates, writes *_clean.csv
 
 - [x] Dataset generated (seed 42 — reproducible across the team)
 - [x] Task 1.1: Data cleaning and validation
-- [ ] Task 1.2: EDA (Member 2)
+- [x] Task 1.2: EDA (Member 2)
 - [ ] Task 1.3: Data integration (Member 1)
 - [ ] Task 2.1: Network analysis (Member 1)
 - [ ] Task 2.2: Geospatial analysis (Member 3)
