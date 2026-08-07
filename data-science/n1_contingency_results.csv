@@ -1,0 +1,6 @@
+Substation,Components Before,Components After,New Splits Caused,Largest Piece Before,Largest Piece After,Substations Cut Off
+Cape Coast Substation,3,5,2,42,20,22
+Takoradi Substation,3,5,2,42,22,20
+Kumasi Central Substation,3,6,3,42,26,16
+Koforidua Substation,3,5,2,42,24,18
+Ho Substation,3,5,2,42,28,14
