@@ -1,18 +1,8 @@
-import sqlite3
 import tkinter as tk
 from tkinter import ttk, messagebox
 from datetime import datetime
 
-
-DATABASE_NAME = "gridcare.db"
-
-
-# ============================================================
-# DATABASE CONNECTION
-# ============================================================
-
-def connect_db():
-    return sqlite3.connect(DATABASE_NAME)
+import operations
 
 
 # ============================================================
@@ -31,28 +21,23 @@ class LoginWindow:
         frame = ttk.Frame(self.root, padding=30)
         frame.pack(expand=True)
 
-        title = ttk.Label(
+        ttk.Label(
             frame,
             text="GRIDCARE-LITE",
             font=("Arial", 22, "bold")
-        )
-        title.grid(row=0, column=0, columnspan=2, pady=10)
+        ).grid(row=0, column=0, columnspan=2, pady=10)
 
-        subtitle = ttk.Label(
+        ttk.Label(
             frame,
             text="Outage and Maintenance Management System"
-        )
-        subtitle.grid(row=1, column=0, columnspan=2, pady=10)
+        ).grid(row=1, column=0, columnspan=2, pady=10)
 
         ttk.Label(
             frame,
             text="Username:"
         ).grid(row=2, column=0, sticky="w", pady=8)
 
-        self.username_entry = ttk.Entry(
-            frame,
-            width=30
-        )
+        self.username_entry = ttk.Entry(frame, width=30)
         self.username_entry.grid(row=2, column=1, pady=8)
 
         ttk.Label(
@@ -67,12 +52,11 @@ class LoginWindow:
         )
         self.password_entry.grid(row=3, column=1, pady=8)
 
-        login_button = ttk.Button(
+        ttk.Button(
             frame,
             text="Log In",
             command=self.login
-        )
-        login_button.grid(
+        ).grid(
             row=4,
             column=0,
             columnspan=2,
@@ -96,7 +80,12 @@ class LoginWindow:
             )
             return
 
-        db = connect_db()
+        users = operations.get_users()
+
+        # Get the user directly from the database
+        import sqlite3
+
+        db = sqlite3.connect("gridcare.db")
         cursor = db.cursor()
 
         cursor.execute("""
@@ -119,10 +108,7 @@ class LoginWindow:
         for widget in self.root.winfo_children():
             widget.destroy()
 
-        Dashboard(
-            self.root,
-            user
-        )
+        Dashboard(self.root, user)
 
 
 # ============================================================
@@ -188,72 +174,42 @@ class Dashboard:
             text="View Outages",
             width=25,
             command=self.open_outages
-        ).grid(
-            row=0,
-            column=0,
-            padx=10,
-            pady=10
-        )
+        ).grid(row=0, column=0, padx=10, pady=10)
 
         ttk.Button(
             buttons_frame,
             text="Report New Outage",
             width=25,
             command=self.report_outage
-        ).grid(
-            row=0,
-            column=1,
-            padx=10,
-            pady=10
-        )
+        ).grid(row=0, column=1, padx=10, pady=10)
 
         ttk.Button(
             buttons_frame,
             text="Work Orders",
             width=25,
             command=self.open_work_orders
-        ).grid(
-            row=1,
-            column=0,
-            padx=10,
-            pady=10
-        )
+        ).grid(row=1, column=0, padx=10, pady=10)
 
         ttk.Button(
             buttons_frame,
             text="Technicians",
             width=25,
             command=self.open_technicians
-        ).grid(
-            row=1,
-            column=1,
-            padx=10,
-            pady=10
-        )
+        ).grid(row=1, column=1, padx=10, pady=10)
 
         ttk.Button(
             buttons_frame,
             text="Refresh Dashboard",
             width=25,
             command=self.refresh_dashboard
-        ).grid(
-            row=2,
-            column=0,
-            padx=10,
-            pady=10
-        )
+        ).grid(row=2, column=0, padx=10, pady=10)
 
         ttk.Button(
             buttons_frame,
             text="Logout",
             width=25,
             command=self.logout
-        ).grid(
-            row=2,
-            column=1,
-            padx=10,
-            pady=10
-        )
+        ).grid(row=2, column=1, padx=10, pady=10)
 
         self.summary_frame = ttk.LabelFrame(
             content,
@@ -272,14 +228,12 @@ class Dashboard:
         for widget in self.summary_frame.winfo_children():
             widget.destroy()
 
-        db = connect_db()
+        import sqlite3
+
+        db = sqlite3.connect("gridcare.db")
         cursor = db.cursor()
 
-        cursor.execute("""
-            SELECT COUNT(*)
-            FROM outages
-        """)
-
+        cursor.execute("SELECT COUNT(*) FROM outages")
         total_outages = cursor.fetchone()[0]
 
         cursor.execute("""
@@ -287,21 +241,18 @@ class Dashboard:
             FROM outages
             WHERE status != 'Resolved'
         """)
-
         open_outages = cursor.fetchone()[0]
 
         cursor.execute("""
             SELECT COUNT(*)
             FROM work_orders
         """)
-
         total_work_orders = cursor.fetchone()[0]
 
         cursor.execute("""
             SELECT COUNT(*)
             FROM technicians
         """)
-
         total_technicians = cursor.fetchone()[0]
 
         db.close()
@@ -327,7 +278,13 @@ class Dashboard:
         ).pack(anchor="w", pady=3)
 
     def refresh_dashboard(self):
+
         self.load_summary()
+
+        messagebox.showinfo(
+            "Dashboard Refreshed",
+            "The dashboard information has been refreshed."
+        )
 
     def open_outages(self):
 
@@ -384,7 +341,7 @@ class OutageWindow:
 
         self.window = tk.Toplevel(parent)
         self.window.title("GridCare-Lite - Outages")
-        self.window.geometry("950x500")
+        self.window.geometry("1000x500")
 
         ttk.Label(
             self.window,
@@ -457,26 +414,7 @@ class OutageWindow:
         for item in self.tree.get_children():
             self.tree.delete(item)
 
-        db = connect_db()
-        cursor = db.cursor()
-
-        cursor.execute("""
-            SELECT
-                outage_id,
-                substation_id,
-                location,
-                description,
-                reported_by,
-                date_reported,
-                priority,
-                status
-            FROM outages
-            ORDER BY outage_id
-        """)
-
-        outages = cursor.fetchall()
-
-        db.close()
+        outages = operations.get_outages()
 
         for outage in outages:
 
@@ -526,7 +464,6 @@ class ReportOutageWindow:
             state="readonly",
             width=45
         )
-
         self.substation_combo.pack(
             fill="x",
             pady=5
@@ -541,10 +478,7 @@ class ReportOutageWindow:
             text="Location:"
         ).pack(anchor="w")
 
-        self.location_entry = ttk.Entry(
-            frame
-        )
-
+        self.location_entry = ttk.Entry(frame)
         self.location_entry.pack(
             fill="x",
             pady=5
@@ -559,7 +493,6 @@ class ReportOutageWindow:
             frame,
             height=5
         )
-
         self.description_entry.pack(
             fill="x",
             pady=5
@@ -596,21 +529,7 @@ class ReportOutageWindow:
 
     def load_substations(self):
 
-        db = connect_db()
-        cursor = db.cursor()
-
-        cursor.execute("""
-            SELECT
-                substation_id,
-                substation_code,
-                name,
-                location
-            FROM substations
-        """)
-
-        self.substation_data = cursor.fetchall()
-
-        db.close()
+        self.substation_data = operations.get_substations()
 
         values = []
 
@@ -639,7 +558,6 @@ class ReportOutageWindow:
                 "Error",
                 "Please select a substation."
             )
-
             return
 
         location = self.location_entry.get().strip()
@@ -658,7 +576,6 @@ class ReportOutageWindow:
                 "Error",
                 "Please complete all required fields."
             )
-
             return
 
         substation_id = self.substation_data[
@@ -669,33 +586,14 @@ class ReportOutageWindow:
             "%Y-%m-%d"
         )
 
-        db = connect_db()
-        cursor = db.cursor()
-
-        cursor.execute("""
-            INSERT INTO outages (
-                substation_id,
-                location,
-                description,
-                reported_by,
-                date_reported,
-                priority
-            )
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (
+        outage_id = operations.report_outage(
             substation_id,
             location,
             description,
             self.user[0],
             date_reported,
             priority
-        ))
-
-        db.commit()
-
-        outage_id = cursor.lastrowid
-
-        db.close()
+        )
 
         messagebox.showinfo(
             "Success",
@@ -718,11 +616,9 @@ class WorkOrderWindow:
         self.user = user
 
         self.window = tk.Toplevel(parent)
-
         self.window.title(
             "GridCare-Lite - Work Orders"
         )
-
         self.window.geometry("950x600")
 
         ttk.Label(
@@ -779,31 +675,20 @@ class WorkOrderWindow:
             pady=10
         )
 
-        buttons = ttk.Frame(
-            self.window
-        )
-
+        buttons = ttk.Frame(self.window)
         buttons.pack(pady=10)
 
         ttk.Button(
             buttons,
             text="Create Work Order",
             command=self.create_work_order
-        ).grid(
-            row=0,
-            column=0,
-            padx=10
-        )
+        ).grid(row=0, column=0, padx=10)
 
         ttk.Button(
             buttons,
             text="Refresh",
             command=self.load_work_orders
-        ).grid(
-            row=0,
-            column=1,
-            padx=10
-        )
+        ).grid(row=0, column=1, padx=10)
 
         self.load_work_orders()
 
@@ -812,24 +697,7 @@ class WorkOrderWindow:
         for item in self.tree.get_children():
             self.tree.delete(item)
 
-        db = connect_db()
-        cursor = db.cursor()
-
-        cursor.execute("""
-            SELECT
-                work_order_id,
-                outage_id,
-                technician_id,
-                date_created,
-                status,
-                description
-            FROM work_orders
-            ORDER BY work_order_id
-        """)
-
-        work_orders = cursor.fetchall()
-
-        db.close()
+        work_orders = operations.get_work_orders()
 
         for work_order in work_orders:
 
@@ -858,18 +726,13 @@ class CreateWorkOrderWindow:
         self.refresh_callback = refresh_callback
 
         self.window = tk.Toplevel(parent)
-
-        self.window.title(
-            "Create Work Order"
-        )
-
+        self.window.title("Create Work Order")
         self.window.geometry("500x500")
 
         frame = ttk.Frame(
             self.window,
             padding=25
         )
-
         frame.pack(
             fill="both",
             expand=True
@@ -891,7 +754,6 @@ class CreateWorkOrderWindow:
             state="readonly",
             width=45
         )
-
         self.outage_combo.pack(
             fill="x",
             pady=5
@@ -911,7 +773,6 @@ class CreateWorkOrderWindow:
             state="readonly",
             width=45
         )
-
         self.technician_combo.pack(
             fill="x",
             pady=5
@@ -930,7 +791,6 @@ class CreateWorkOrderWindow:
             frame,
             height=6
         )
-
         self.description_entry.pack(
             fill="x",
             pady=5
@@ -944,22 +804,13 @@ class CreateWorkOrderWindow:
 
     def load_outages(self):
 
-        db = connect_db()
-        cursor = db.cursor()
+        all_outages = operations.get_outages()
 
-        cursor.execute("""
-            SELECT
-                outage_id,
-                location,
-                description,
-                status
-            FROM outages
-            WHERE status != 'Resolved'
-        """)
-
-        self.outage_data = cursor.fetchall()
-
-        db.close()
+        self.outage_data = [
+            outage
+            for outage in all_outages
+            if outage[7] != "Resolved"
+        ]
 
         values = []
 
@@ -967,8 +818,8 @@ class CreateWorkOrderWindow:
 
             text = (
                 f"Outage #{outage[0]} - "
-                f"{outage[1]} - "
-                f"{outage[3]}"
+                f"{outage[2]} - "
+                f"{outage[7]}"
             )
 
             values.append(text)
@@ -980,22 +831,13 @@ class CreateWorkOrderWindow:
 
     def load_technicians(self):
 
-        db = connect_db()
-        cursor = db.cursor()
+        all_technicians = operations.get_technicians()
 
-        cursor.execute("""
-            SELECT
-                technician_id,
-                name,
-                specialization,
-                availability
-            FROM technicians
-            WHERE availability = 'Available'
-        """)
-
-        self.technician_data = cursor.fetchall()
-
-        db.close()
+        self.technician_data = [
+            technician
+            for technician in all_technicians
+            if technician[4] == "Available"
+        ]
 
         values = []
 
@@ -1017,7 +859,6 @@ class CreateWorkOrderWindow:
     def submit(self):
 
         outage_index = self.outage_combo.current()
-
         technician_index = self.technician_combo.current()
 
         if outage_index == -1:
@@ -1026,7 +867,6 @@ class CreateWorkOrderWindow:
                 "Error",
                 "Please select an outage."
             )
-
             return
 
         if technician_index == -1:
@@ -1035,7 +875,6 @@ class CreateWorkOrderWindow:
                 "Error",
                 "Please select a technician."
             )
-
             return
 
         description = (
@@ -1050,7 +889,6 @@ class CreateWorkOrderWindow:
                 "Error",
                 "Please enter a work description."
             )
-
             return
 
         outage_id = self.outage_data[
@@ -1065,31 +903,12 @@ class CreateWorkOrderWindow:
             "%Y-%m-%d"
         )
 
-        db = connect_db()
-        cursor = db.cursor()
-
-        cursor.execute("""
-            INSERT INTO work_orders (
-                outage_id,
-                technician_id,
-                date_created,
-                status,
-                description
-            )
-            VALUES (?, ?, ?, ?, ?)
-        """, (
+        work_order_id = operations.create_work_order(
             outage_id,
             technician_id,
-            date_created,
-            "Pending",
-            description
-        ))
-
-        db.commit()
-
-        work_order_id = cursor.lastrowid
-
-        db.close()
+            description,
+            date_created
+        )
 
         messagebox.showinfo(
             "Success",
@@ -1115,11 +934,11 @@ class TechnicianWindow:
             "GridCare-Lite - Technicians"
         )
 
-        self.window.geometry("750x450")
+        self.window.geometry("800x500")
 
         ttk.Label(
             self.window,
-            text="Technicians",
+            text="Technician Management",
             font=("Arial", 18, "bold")
         ).pack(pady=15)
 
@@ -1164,11 +983,20 @@ class TechnicianWindow:
             pady=10
         )
 
+        buttons = ttk.Frame(self.window)
+        buttons.pack(pady=10)
+
         ttk.Button(
-            self.window,
+            buttons,
+            text="Add Technician",
+            command=self.add_technician
+        ).grid(row=0, column=0, padx=10)
+
+        ttk.Button(
+            buttons,
             text="Refresh",
             command=self.load_technicians
-        ).pack(pady=10)
+        ).grid(row=0, column=1, padx=10)
 
         self.load_technicians()
 
@@ -1177,23 +1005,7 @@ class TechnicianWindow:
         for item in self.tree.get_children():
             self.tree.delete(item)
 
-        db = connect_db()
-        cursor = db.cursor()
-
-        cursor.execute("""
-            SELECT
-                technician_id,
-                name,
-                phone,
-                specialization,
-                availability
-            FROM technicians
-            ORDER BY technician_id
-        """)
-
-        technicians = cursor.fetchall()
-
-        db.close()
+        technicians = operations.get_technicians()
 
         for technician in technicians:
 
@@ -1202,6 +1014,139 @@ class TechnicianWindow:
                 "end",
                 values=technician
             )
+
+    def add_technician(self):
+
+        AddTechnicianWindow(
+            self.window,
+            self.load_technicians
+        )
+
+
+# ============================================================
+# ADD TECHNICIAN WINDOW
+# ============================================================
+
+class AddTechnicianWindow:
+
+    def __init__(self, parent, refresh_callback):
+
+        self.refresh_callback = refresh_callback
+
+        self.window = tk.Toplevel(parent)
+        self.window.title("Add Technician")
+        self.window.geometry("450x400")
+
+        frame = ttk.Frame(
+            self.window,
+            padding=25
+        )
+        frame.pack(
+            fill="both",
+            expand=True
+        )
+
+        ttk.Label(
+            frame,
+            text="Add Technician",
+            font=("Arial", 18, "bold")
+        ).pack(pady=10)
+
+        ttk.Label(
+            frame,
+            text="Name:"
+        ).pack(anchor="w")
+
+        self.name_entry = ttk.Entry(frame)
+        self.name_entry.pack(
+            fill="x",
+            pady=5
+        )
+
+        ttk.Label(
+            frame,
+            text="Phone:"
+        ).pack(anchor="w")
+
+        self.phone_entry = ttk.Entry(frame)
+        self.phone_entry.pack(
+            fill="x",
+            pady=5
+        )
+
+        ttk.Label(
+            frame,
+            text="Specialization:"
+        ).pack(anchor="w")
+
+        self.specialization_entry = ttk.Entry(frame)
+        self.specialization_entry.pack(
+            fill="x",
+            pady=5
+        )
+
+        ttk.Label(
+            frame,
+            text="Availability:"
+        ).pack(anchor="w")
+
+        self.availability_combo = ttk.Combobox(
+            frame,
+            values=[
+                "Available",
+                "Busy",
+                "Unavailable"
+            ],
+            state="readonly"
+        )
+
+        self.availability_combo.set("Available")
+
+        self.availability_combo.pack(
+            fill="x",
+            pady=5
+        )
+
+        ttk.Button(
+            frame,
+            text="Add Technician",
+            command=self.submit
+        ).pack(pady=20)
+
+    def submit(self):
+
+        name = self.name_entry.get().strip()
+        phone = self.phone_entry.get().strip()
+        specialization = (
+            self.specialization_entry
+            .get()
+            .strip()
+        )
+        availability = self.availability_combo.get()
+
+        if not name or not phone or not specialization:
+
+            messagebox.showerror(
+                "Error",
+                "Please complete all fields."
+            )
+            return
+
+        technician_id = operations.add_technician(
+            name,
+            phone,
+            specialization,
+            availability
+        )
+
+        messagebox.showinfo(
+            "Success",
+            f"Technician #{technician_id} added successfully."
+        )
+
+        self.refresh_callback()
+
+        self.window.destroy()
 
 
 # ============================================================
