@@ -28,10 +28,11 @@ def add_user(name, role, username, password):
         """, (name, role, username, password))
 
         db.commit()
+
         print("User added successfully!")
 
-    except sqlite3.IntegrityError:
-        print("Username already exists.")
+    except sqlite3.IntegrityError as error:
+        print("Could not add user:", error)
 
     finally:
         db.close()
@@ -73,10 +74,17 @@ def add_substation(substation_code, name, location):
         """, (substation_code, name, location))
 
         db.commit()
-        print("Substation added successfully!")
 
-    except sqlite3.IntegrityError:
-        print("Substation could not be added.")
+        substation_id = cursor.lastrowid
+
+        print("Substation added successfully!")
+        print("Substation ID:", substation_id)
+
+        return substation_id
+
+    except sqlite3.IntegrityError as error:
+        print("Could not add substation:", error)
+        return None
 
     finally:
         db.close()
@@ -118,37 +126,35 @@ def report_outage(
     db = connect_db()
     cursor = db.cursor()
 
-    try:
-        cursor.execute("""
-            INSERT INTO outages (
-                substation_id,
-                location,
-                description,
-                reported_by,
-                date_reported,
-                priority
-            )
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (
+    cursor.execute("""
+        INSERT INTO outages (
             substation_id,
             location,
             description,
             reported_by,
             date_reported,
             priority
-        ))
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (
+        substation_id,
+        location,
+        description,
+        reported_by,
+        date_reported,
+        priority
+    ))
 
-        db.commit()
+    db.commit()
 
-        outage_id = cursor.lastrowid
+    outage_id = cursor.lastrowid
 
-        print("Outage reported successfully!")
-        print("Outage ID:", outage_id)
+    db.close()
 
-        return outage_id
+    print("Outage reported successfully!")
+    print("Outage ID:", outage_id)
 
-    finally:
-        db.close()
+    return outage_id
 
 
 def get_outages():
@@ -181,59 +187,64 @@ def get_outages():
 # ============================================================
 
 def update_outage_status(outage_id, new_status, updated_by):
+
     db = connect_db()
     cursor = db.cursor()
 
-    try:
-        cursor.execute("""
-            SELECT status
-            FROM outages
-            WHERE outage_id = ?
-        """, (outage_id,))
+    cursor.execute("""
+        SELECT status
+        FROM outages
+        WHERE outage_id = ?
+    """, (outage_id,))
 
-        result = cursor.fetchone()
+    result = cursor.fetchone()
 
-        if result is None:
-            return False, "Outage not found."
+    if result is None:
+        print("Outage not found.")
+        db.close()
+        return False
 
-        old_status = result[0]
+    old_status = result[0]
 
-        cursor.execute("""
-            UPDATE outages
-            SET status = ?
-            WHERE outage_id = ?
-        """, (new_status, outage_id))
+    cursor.execute("""
+        UPDATE outages
+        SET status = ?
+        WHERE outage_id = ?
+    """, (new_status, outage_id))
 
-        update_time = datetime.now().strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
+    update_time = datetime.now().strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
 
-        cursor.execute("""
-            INSERT INTO status_updates (
-                outage_id,
-                old_status,
-                new_status,
-                update_time,
-                updated_by
-            )
-            VALUES (?, ?, ?, ?, ?)
-        """, (
+    cursor.execute("""
+        INSERT INTO status_updates (
             outage_id,
             old_status,
             new_status,
             update_time,
             updated_by
-        ))
+        )
+        VALUES (?, ?, ?, ?, ?)
+    """, (
+        outage_id,
+        old_status,
+        new_status,
+        update_time,
+        updated_by
+    ))
 
-        db.commit()
+    db.commit()
+    db.close()
 
-        return True, f"Outage #{outage_id} updated successfully."
+    print("Outage status updated successfully!")
+    print("Old status:", old_status)
+    print("New status:", new_status)
 
-    finally:
-        db.close()
+    return True
 
 
 def get_status_updates():
+
     db = connect_db()
     cursor = db.cursor()
 
@@ -266,6 +277,7 @@ def add_technician(
     specialization,
     availability="Available"
 ):
+
     db = connect_db()
     cursor = db.cursor()
 
@@ -290,10 +302,14 @@ def add_technician(
 
     db.close()
 
+    print("Technician added successfully!")
+    print("Technician ID:", technician_id)
+
     return technician_id
 
 
 def get_technicians():
+
     db = connect_db()
     cursor = db.cursor()
 
@@ -325,6 +341,7 @@ def create_work_order(
     description,
     date_created
 ):
+
     db = connect_db()
     cursor = db.cursor()
 
@@ -351,10 +368,14 @@ def create_work_order(
 
     db.close()
 
+    print("Work order created successfully!")
+    print("Work Order ID:", work_order_id)
+
     return work_order_id
 
 
 def get_work_orders():
+
     db = connect_db()
     cursor = db.cursor()
 
@@ -377,9 +398,26 @@ def get_work_orders():
     return work_orders
 
 
-def update_work_order_status(work_order_id, new_status):
+def update_work_order_status(
+    work_order_id,
+    new_status
+):
+
     db = connect_db()
     cursor = db.cursor()
+
+    cursor.execute("""
+        SELECT work_order_id
+        FROM work_orders
+        WHERE work_order_id = ?
+    """, (work_order_id,))
+
+    result = cursor.fetchone()
+
+    if result is None:
+        print("Work order not found.")
+        db.close()
+        return False
 
     cursor.execute("""
         UPDATE work_orders
@@ -391,12 +429,11 @@ def update_work_order_status(work_order_id, new_status):
     ))
 
     db.commit()
-
-    changed = cursor.rowcount > 0
-
     db.close()
 
-    return changed
+    print("Work order status updated successfully!")
+
+    return True
 
 
 # ============================================================
@@ -411,6 +448,7 @@ def record_maintenance(
     action_taken,
     notes
 ):
+
     db = connect_db()
     cursor = db.cursor()
 
@@ -439,10 +477,14 @@ def record_maintenance(
 
     db.close()
 
+    print("Maintenance record created successfully!")
+    print("Maintenance ID:", maintenance_id)
+
     return maintenance_id
 
 
 def get_maintenance_records():
+
     db = connect_db()
     cursor = db.cursor()
 
