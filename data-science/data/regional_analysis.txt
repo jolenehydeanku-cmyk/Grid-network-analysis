@@ -1,0 +1,51 @@
+======================================================================
+TASK 2.2 — GEOGRAPHIC / GEOSPATIAL ANALYSIS
+======================================================================
+
+--- Substation count by region ---
+Region
+Greater Accra           6
+Ashanti                 5
+Western                 4
+Central                 4
+Eastern                 4
+Volta                   4
+Bono                    3
+Northern                3
+Upper East              2
+Upper West              1
+Burkina Faso border     1
+Cote d'Ivoire border    1
+Togo border             1
+Togo                    1
+Benin                   1
+Cote d'Ivoire           1
+Burkina Faso            1
+Guinea                  1
+
+--- Substations by voltage tier ---
+Voltage (kV)
+11      9
+33      6
+69      8
+161    11
+330    10
+
+Regions with 1 or fewer substations (possible coverage gap): ['Upper West', 'Burkina Faso border', "Cote d'Ivoire border", 'Togo border', 'Togo', 'Benin', "Cote d'Ivoire", 'Burkina Faso', 'Guinea']
+
+--- Line length statistics (recorded route length) ---
+count     55.000000
+mean      99.312727
+std       90.275104
+min        3.800000
+25%       42.900000
+50%       75.900000
+75%      129.600000
+max      426.000000
+
+--- Recorded vs straight-line distance ---
+Average recorded length is 1.17x the straight-line distance (expected — real routes aren't straight lines).
+
+Saved distance_distribution.png
+
+Saved grid_map.html
