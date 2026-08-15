@@ -1,6 +1,7 @@
 import sqlite3
 from datetime import datetime
 
+
 DATABASE_NAME = "gridcare.db"
 
 
@@ -20,15 +21,20 @@ def add_user(name, role, username, password):
     db = connect_db()
     cursor = db.cursor()
 
-    cursor.execute("""
-        INSERT INTO users (name, role, username, password)
-        VALUES (?, ?, ?, ?)
-    """, (name, role, username, password))
+    try:
+        cursor.execute("""
+            INSERT INTO users (name, role, username, password)
+            VALUES (?, ?, ?, ?)
+        """, (name, role, username, password))
 
-    db.commit()
-    db.close()
+        db.commit()
+        print("User added successfully!")
 
-    print("User added successfully!")
+    except sqlite3.IntegrityError:
+        print("Username already exists.")
+
+    finally:
+        db.close()
 
 
 def get_users():
@@ -38,6 +44,7 @@ def get_users():
     cursor.execute("""
         SELECT user_id, name, role, username
         FROM users
+        ORDER BY user_id
     """)
 
     users = cursor.fetchall()
@@ -55,19 +62,24 @@ def add_substation(substation_code, name, location):
     db = connect_db()
     cursor = db.cursor()
 
-    cursor.execute("""
-        INSERT INTO substations (
-            substation_code,
-            name,
-            location
-        )
-        VALUES (?, ?, ?)
-    """, (substation_code, name, location))
+    try:
+        cursor.execute("""
+            INSERT INTO substations (
+                substation_code,
+                name,
+                location
+            )
+            VALUES (?, ?, ?)
+        """, (substation_code, name, location))
 
-    db.commit()
-    db.close()
+        db.commit()
+        print("Substation added successfully!")
 
-    print("Substation added successfully!")
+    except sqlite3.IntegrityError:
+        print("Substation could not be added.")
+
+    finally:
+        db.close()
 
 
 def get_substations():
@@ -81,6 +93,7 @@ def get_substations():
             name,
             location
         FROM substations
+        ORDER BY substation_id
     """)
 
     substations = cursor.fetchall()
@@ -105,35 +118,37 @@ def report_outage(
     db = connect_db()
     cursor = db.cursor()
 
-    cursor.execute("""
-        INSERT INTO outages (
+    try:
+        cursor.execute("""
+            INSERT INTO outages (
+                substation_id,
+                location,
+                description,
+                reported_by,
+                date_reported,
+                priority
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
             substation_id,
             location,
             description,
             reported_by,
             date_reported,
             priority
-        )
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (
-        substation_id,
-        location,
-        description,
-        reported_by,
-        date_reported,
-        priority
-    ))
+        ))
 
-    db.commit()
+        db.commit()
 
-    outage_id = cursor.lastrowid
+        outage_id = cursor.lastrowid
 
-    db.close()
+        print("Outage reported successfully!")
+        print("Outage ID:", outage_id)
 
-    print("Outage reported successfully!")
-    print("Outage ID:", outage_id)
+        return outage_id
 
-    return outage_id
+    finally:
+        db.close()
 
 
 def get_outages():
@@ -169,55 +184,53 @@ def update_outage_status(outage_id, new_status, updated_by):
     db = connect_db()
     cursor = db.cursor()
 
-    # Get the current status
-    cursor.execute("""
-        SELECT status
-        FROM outages
-        WHERE outage_id = ?
-    """, (outage_id,))
+    try:
+        cursor.execute("""
+            SELECT status
+            FROM outages
+            WHERE outage_id = ?
+        """, (outage_id,))
 
-    result = cursor.fetchone()
+        result = cursor.fetchone()
 
-    if result is None:
-        print("Outage not found.")
-        db.close()
-        return
+        if result is None:
+            return False, "Outage not found."
 
-    old_status = result[0]
+        old_status = result[0]
 
-    # Update the outage status
-    cursor.execute("""
-        UPDATE outages
-        SET status = ?
-        WHERE outage_id = ?
-    """, (new_status, outage_id))
+        cursor.execute("""
+            UPDATE outages
+            SET status = ?
+            WHERE outage_id = ?
+        """, (new_status, outage_id))
 
-    # Record the status change
-    update_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        update_time = datetime.now().strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
 
-    cursor.execute("""
-        INSERT INTO status_updates (
+        cursor.execute("""
+            INSERT INTO status_updates (
+                outage_id,
+                old_status,
+                new_status,
+                update_time,
+                updated_by
+            )
+            VALUES (?, ?, ?, ?, ?)
+        """, (
             outage_id,
             old_status,
             new_status,
             update_time,
             updated_by
-        )
-        VALUES (?, ?, ?, ?, ?)
-    """, (
-        outage_id,
-        old_status,
-        new_status,
-        update_time,
-        updated_by
-    ))
+        ))
 
-    db.commit()
-    db.close()
+        db.commit()
 
-    print("Outage status updated successfully!")
-    print("Old status:", old_status)
-    print("New status:", new_status)
+        return True, f"Outage #{outage_id} updated successfully."
+
+    finally:
+        db.close()
 
 
 def get_status_updates():
@@ -276,9 +289,6 @@ def add_technician(
     technician_id = cursor.lastrowid
 
     db.close()
-
-    print("Technician added successfully!")
-    print("Technician ID:", technician_id)
 
     return technician_id
 
@@ -341,9 +351,6 @@ def create_work_order(
 
     db.close()
 
-    print("Work order created successfully!")
-    print("Work Order ID:", work_order_id)
-
     return work_order_id
 
 
@@ -385,9 +392,11 @@ def update_work_order_status(work_order_id, new_status):
 
     db.commit()
 
+    changed = cursor.rowcount > 0
+
     db.close()
 
-    print("Work order status updated successfully!")
+    return changed
 
 
 # ============================================================
@@ -430,9 +439,6 @@ def record_maintenance(
 
     db.close()
 
-    print("Maintenance record created successfully!")
-    print("Maintenance ID:", maintenance_id)
-
     return maintenance_id
 
 
@@ -458,162 +464,3 @@ def get_maintenance_records():
     db.close()
 
     return maintenance_records
-
-
-# ============================================================
-# MAIN TEST PROGRAM
-# ============================================================
-
-if __name__ == "__main__":
-
-    # --------------------------------------------------------
-    # USERS
-    # --------------------------------------------------------
-
-    print("\nUsers in GridCare-Lite:")
-
-    users = get_users()
-
-    for user in users:
-        print(user)
-
-    # --------------------------------------------------------
-    # SUBSTATIONS
-    # --------------------------------------------------------
-
-    print("\nSubstations in GridCare-Lite:")
-
-    substations = get_substations()
-
-    for substation in substations:
-        print(substation)
-
-    # --------------------------------------------------------
-    # OUTAGES
-    # --------------------------------------------------------
-
-    print("\nOutages in GridCare-Lite:")
-
-    outages = get_outages()
-
-    for outage in outages:
-        print(outage)
-
-    # --------------------------------------------------------
-    # TECHNICIANS
-    # --------------------------------------------------------
-
-    print("\nTechnicians in GridCare-Lite:")
-
-    technicians = get_technicians()
-
-    for technician in technicians:
-        print(technician)
-
-    # --------------------------------------------------------
-    # WORK ORDERS
-    # --------------------------------------------------------
-
-    print("\nWork orders in GridCare-Lite:")
-
-    work_orders = get_work_orders()
-
-    for work_order in work_orders:
-        print(work_order)
-
-    # --------------------------------------------------------
-    # UPDATE AN EXISTING WORK ORDER
-    # --------------------------------------------------------
-
-    print("\nUpdating Work Order #1 to In Progress...")
-
-    update_work_order_status(
-        1,
-        "In Progress"
-    )
-
-    # --------------------------------------------------------
-    # UPDATE OUTAGE STATUS
-    # --------------------------------------------------------
-
-    print("\nUpdating Outage #1 to In Progress...")
-
-    update_outage_status(
-        1,
-        "In Progress",
-        1
-    )
-
-    # --------------------------------------------------------
-    # RECORD MAINTENANCE
-    # --------------------------------------------------------
-
-    print("\nRecording maintenance for Work Order #1...")
-
-    maintenance_id = record_maintenance(
-        1,
-        1,
-        "2026-08-10 10:00:00",
-        "2026-08-10 14:00:00",
-        "Inspected the electrical equipment and repaired the faulty connection.",
-        "Equipment tested successfully after the repair."
-    )
-
-    # --------------------------------------------------------
-    # DISPLAY MAINTENANCE
-    # --------------------------------------------------------
-
-    print("\nMaintenance records in GridCare-Lite:")
-
-    maintenance_records = get_maintenance_records()
-
-    for record in maintenance_records:
-        print(record)
-
-    # --------------------------------------------------------
-    # COMPLETE WORK ORDER
-    # --------------------------------------------------------
-
-    print("\nUpdating Work Order #1 to Completed...")
-
-    update_work_order_status(
-        1,
-        "Completed"
-    )
-
-    # --------------------------------------------------------
-    # RESOLVE OUTAGE
-    # --------------------------------------------------------
-
-    print("\nUpdating Outage #1 to Resolved...")
-
-    update_outage_status(
-        1,
-        "Resolved",
-        1
-    )
-
-    # --------------------------------------------------------
-    # DISPLAY FINAL STATUS
-    # --------------------------------------------------------
-
-    print("\nFinal outage information:")
-
-    outages = get_outages()
-
-    for outage in outages:
-        print(outage)
-
-    print("\nFinal work order information:")
-
-    work_orders = get_work_orders()
-
-    for work_order in work_orders:
-        print(work_order)
-
-    print("\nStatus update history:")
-
-    status_updates = get_status_updates()
-
-    for update in status_updates:
-        print(update)
