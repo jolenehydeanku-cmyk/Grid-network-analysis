@@ -54,3 +54,6 @@ Line ID,Utility ID,Source Substation ID,Source Substation,Destination Substation
 53,6,39,Aflao Border Station,2,Tema Substation,330,157.9,207.8,Active,Overhead,39,Aflao Border Station,Aflao Border Station,Togo border,Togo,6.12,1.19,330,423.2,Transmission,Active,2,Tema Substation,Tema,Greater Accra,Ghana,5.6596,-0.0226,330,48.5,Transmission,Active,6,Communaute Electrique du Benin,CEB,CEB,Transmission,Togo/Benin,Y
 54,6,39,Aflao Border Station,40,Lome Transmission Hub,330,3.8,323.5,Active,Overhead,39,Aflao Border Station,Aflao Border Station,Togo border,Togo,6.12,1.19,330,423.2,Transmission,Active,40,Lome Transmission Hub,Lome Transmission Hub,Togo,Togo,6.13,1.22,161,120.2,Transmission,Active,6,Communaute Electrique du Benin,CEB,CEB,Transmission,Togo/Benin,Y
 55,6,40,Lome Transmission Hub,41,Cotonou Transmission Hub,330,150.0,326.6,Active,Overhead,40,Lome Transmission Hub,Lome Transmission Hub,Togo,Togo,6.13,1.22,161,120.2,Transmission,Active,41,Cotonou Transmission Hub,Cotonou Transmission Hub,Benin,Benin,6.37,2.43,161,487.6,Transmission,Active,6,Communaute Electrique du Benin,CEB,CEB,Transmission,Togo/Benin,Y
+
+
+
