@@ -404,7 +404,7 @@ class Dashboard:
 
         self.user_id = user[0]
         self.name = user[1]
-        self.role = user[2]
+        self.role = self.normalize_role(user[2])
         self.username = user[3]
 
         self.root.title(
@@ -414,6 +414,38 @@ class Dashboard:
         self.root.geometry("900x650")
 
         self.build_dashboard()
+
+    # --------------------------------------------------------
+    # NORMALIZE EXISTING AND NEW ROLE NAMES
+    # --------------------------------------------------------
+
+    def normalize_role(self, role):
+
+        role = role.strip().lower()
+
+        role_mapping = {
+            "manager": "Administrator",
+            "admin": "Administrator",
+            "administrator": "Administrator",
+
+            "engineer": "Engineer",
+
+            "technician": "Technician",
+
+            "customer_service": "Customer Service",
+            "customer service": "Customer Service",
+
+            "customer": "Customer"
+        }
+
+        return role_mapping.get(
+            role,
+            role.title()
+        )
+
+    # --------------------------------------------------------
+    # DASHBOARD
+    # --------------------------------------------------------
 
     def build_dashboard(self):
 
@@ -453,7 +485,7 @@ class Dashboard:
 
         ttk.Label(
             content,
-            text="Operations Dashboard",
+            text=f"{self.role} Dashboard",
             font=("Arial", 18, "bold")
         ).pack(
             pady=15
@@ -467,77 +499,245 @@ class Dashboard:
             pady=10
         )
 
-        ttk.Button(
-            buttons_frame,
-            text="View Outages",
-            width=25,
-            command=self.open_outages
-        ).grid(
-            row=0,
-            column=0,
-            padx=10,
-            pady=10
-        )
+        # ====================================================
+        # ADMINISTRATOR
+        # ====================================================
 
-        ttk.Button(
-            buttons_frame,
-            text="Report New Outage",
-            width=25,
-            command=self.report_outage
-        ).grid(
-            row=0,
-            column=1,
-            padx=10,
-            pady=10
-        )
+        if self.role == "Administrator":
 
-        ttk.Button(
-            buttons_frame,
-            text="Work Orders",
-            width=25,
-            command=self.open_work_orders
-        ).grid(
-            row=1,
-            column=0,
-            padx=10,
-            pady=10
-        )
+            ttk.Button(
+                buttons_frame,
+                text="View Outages",
+                width=25,
+                command=self.open_outages
+            ).grid(
+                row=0,
+                column=0,
+                padx=10,
+                pady=10
+            )
 
-        ttk.Button(
-            buttons_frame,
-            text="Technicians",
-            width=25,
-            command=self.open_technicians
-        ).grid(
-            row=1,
-            column=1,
-            padx=10,
-            pady=10
-        )
+            ttk.Button(
+                buttons_frame,
+                text="Report New Outage",
+                width=25,
+                command=self.report_outage
+            ).grid(
+                row=0,
+                column=1,
+                padx=10,
+                pady=10
+            )
 
-        ttk.Button(
-            buttons_frame,
-            text="Maintenance",
-            width=25,
-            command=self.open_maintenance
-        ).grid(
-            row=2,
-            column=0,
-            padx=10,
-            pady=10
-        )
+            ttk.Button(
+                buttons_frame,
+                text="Work Orders",
+                width=25,
+                command=self.open_work_orders
+            ).grid(
+                row=1,
+                column=0,
+                padx=10,
+                pady=10
+            )
 
-        ttk.Button(
-            buttons_frame,
-            text="Refresh Dashboard",
-            width=25,
-            command=self.refresh_dashboard
-        ).grid(
-            row=2,
-            column=1,
-            padx=10,
-            pady=10
-        )
+            ttk.Button(
+                buttons_frame,
+                text="Technicians",
+                width=25,
+                command=self.open_technicians
+            ).grid(
+                row=1,
+                column=1,
+                padx=10,
+                pady=10
+            )
+
+            ttk.Button(
+                buttons_frame,
+                text="Maintenance",
+                width=25,
+                command=self.open_maintenance
+            ).grid(
+                row=2,
+                column=0,
+                padx=10,
+                pady=10
+            )
+
+            ttk.Button(
+                buttons_frame,
+                text="Refresh Dashboard",
+                width=25,
+                command=self.refresh_dashboard
+            ).grid(
+                row=2,
+                column=1,
+                padx=10,
+                pady=10
+            )
+
+        # ====================================================
+        # ENGINEER
+        # ====================================================
+
+        elif self.role == "Engineer":
+
+            ttk.Button(
+                buttons_frame,
+                text="View Outages",
+                width=25,
+                command=self.open_outages
+            ).grid(
+                row=0,
+                column=0,
+                padx=10,
+                pady=10
+            )
+
+            ttk.Button(
+                buttons_frame,
+                text="Report New Outage",
+                width=25,
+                command=self.report_outage
+            ).grid(
+                row=0,
+                column=1,
+                padx=10,
+                pady=10
+            )
+
+            ttk.Button(
+                buttons_frame,
+                text="Refresh Dashboard",
+                width=25,
+                command=self.refresh_dashboard
+            ).grid(
+                row=1,
+                column=0,
+                padx=10,
+                pady=10
+            )
+
+        # ====================================================
+        # TECHNICIAN
+        # ====================================================
+
+        elif self.role == "Technician":
+
+            ttk.Button(
+                buttons_frame,
+                text="My Work Orders",
+                width=25,
+                command=self.open_work_orders
+            ).grid(
+                row=0,
+                column=0,
+                padx=10,
+                pady=10
+            )
+
+            ttk.Button(
+                buttons_frame,
+                text="Maintenance",
+                width=25,
+                command=self.open_maintenance
+            ).grid(
+                row=0,
+                column=1,
+                padx=10,
+                pady=10
+            )
+
+            ttk.Button(
+                buttons_frame,
+                text="Refresh Dashboard",
+                width=25,
+                command=self.refresh_dashboard
+            ).grid(
+                row=1,
+                column=0,
+                padx=10,
+                pady=10
+            )
+
+        # ====================================================
+        # CUSTOMER SERVICE
+        # ====================================================
+
+        elif self.role == "Customer Service":
+
+            ttk.Button(
+                buttons_frame,
+                text="View Outages",
+                width=25,
+                command=self.open_outages
+            ).grid(
+                row=0,
+                column=0,
+                padx=10,
+                pady=10
+            )
+
+            ttk.Button(
+                buttons_frame,
+                text="Refresh Dashboard",
+                width=25,
+                command=self.refresh_dashboard
+            ).grid(
+                row=0,
+                column=1,
+                padx=10,
+                pady=10
+            )
+
+        # ====================================================
+        # EXISTING CUSTOMER ROLE
+        # ====================================================
+
+        elif self.role == "Customer":
+
+            ttk.Button(
+                buttons_frame,
+                text="View Outages",
+                width=25,
+                command=self.open_outages
+            ).grid(
+                row=0,
+                column=0,
+                padx=10,
+                pady=10
+            )
+
+            ttk.Button(
+                buttons_frame,
+                text="Refresh Dashboard",
+                width=25,
+                command=self.refresh_dashboard
+            ).grid(
+                row=0,
+                column=1,
+                padx=10,
+                pady=10
+            )
+
+        # ====================================================
+        # UNKNOWN ROLE
+        # ====================================================
+
+        else:
+
+            ttk.Label(
+                buttons_frame,
+                text="Your account does not have a recognized role.",
+                foreground="red"
+            ).pack(
+                pady=20
+            )
+
+        # ====================================================
+        # LOGOUT
+        # ====================================================
 
         ttk.Button(
             buttons_frame,
@@ -545,11 +745,15 @@ class Dashboard:
             width=25,
             command=self.logout
         ).grid(
-            row=3,
+            row=10,
             column=0,
             columnspan=2,
-            pady=10
+            pady=20
         )
+
+        # ====================================================
+        # SYSTEM SUMMARY
+        # ====================================================
 
         self.summary_frame = ttk.LabelFrame(
             content,
@@ -563,6 +767,10 @@ class Dashboard:
         )
 
         self.load_summary()
+
+    # --------------------------------------------------------
+    # LOAD DASHBOARD SUMMARY
+    # --------------------------------------------------------
 
     def load_summary(self):
 
@@ -648,6 +856,10 @@ class Dashboard:
                 pady=3
             )
 
+    # --------------------------------------------------------
+    # REFRESH
+    # --------------------------------------------------------
+
     def refresh_dashboard(self):
 
         self.load_summary()
@@ -657,12 +869,20 @@ class Dashboard:
             "Dashboard information has been refreshed."
         )
 
+    # --------------------------------------------------------
+    # OPEN OUTAGES
+    # --------------------------------------------------------
+
     def open_outages(self):
 
         OutageWindow(
             self.root,
             self.user
         )
+
+    # --------------------------------------------------------
+    # REPORT OUTAGE
+    # --------------------------------------------------------
 
     def report_outage(self):
 
@@ -672,6 +892,10 @@ class Dashboard:
             self.load_summary
         )
 
+    # --------------------------------------------------------
+    # WORK ORDERS
+    # --------------------------------------------------------
+
     def open_work_orders(self):
 
         WorkOrderWindow(
@@ -679,17 +903,29 @@ class Dashboard:
             self.user
         )
 
+    # --------------------------------------------------------
+    # TECHNICIANS
+    # --------------------------------------------------------
+
     def open_technicians(self):
 
         TechnicianWindow(
             self.root
         )
 
+    # --------------------------------------------------------
+    # MAINTENANCE
+    # --------------------------------------------------------
+
     def open_maintenance(self):
 
         MaintenanceWindow(
             self.root
         )
+
+    # --------------------------------------------------------
+    # LOGOUT
+    # --------------------------------------------------------
 
     def logout(self):
 
