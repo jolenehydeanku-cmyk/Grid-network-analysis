@@ -1,36 +1,27 @@
 import sqlite3
 
-DATABASE_NAME = "gridcare.db"
+conn = sqlite3.connect("gridcare.db")
+cursor = conn.cursor()
 
-db = sqlite3.connect(DATABASE_NAME)
-cursor = db.cursor()
-
-tables = cursor.execute("""
-    SELECT name
-    FROM sqlite_master
-    WHERE type = 'table'
-    AND name NOT LIKE 'sqlite_%'
-    ORDER BY name
-""").fetchall()
-
-print("GridCare-Lite database data:")
-print()
+tables = [
+    "users",
+    "substations",
+    "outages",
+    "work_orders",
+    "technicians",
+    "maintenance",
+    "status_updates",
+    "complaints"
+]
 
 for table in tables:
-    table_name = table[0]
+    print("\n==============================")
+    print("TABLE:", table)
+    print("==============================")
 
-    print(f"--- {table_name} ---")
+    cursor.execute(f"PRAGMA table_info({table})")
 
-    rows = cursor.execute(
-        f"SELECT * FROM {table_name}"
-    ).fetchall()
+    for column in cursor.fetchall():
+        print(column)
 
-    if rows:
-        for row in rows:
-            print(row)
-    else:
-        print("(empty)")
-
-    print()
-
-db.close()
+conn.close()
