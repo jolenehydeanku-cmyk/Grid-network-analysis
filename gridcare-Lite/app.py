@@ -98,6 +98,28 @@ def prepare_database():
         )
 
     # --------------------------------------------------------
+    # Add scheduled_date to work_orders if it does not exist
+    # --------------------------------------------------------
+
+    cursor.execute(
+        "PRAGMA table_info(work_orders)"
+    )
+
+    work_order_columns = [
+        row[1]
+        for row in cursor.fetchall()
+    ]
+
+    if "scheduled_date" not in work_order_columns:
+
+        cursor.execute(
+            """
+            ALTER TABLE work_orders
+            ADD COLUMN scheduled_date TEXT
+            """
+        )
+
+    # --------------------------------------------------------
     # Convert old roles to the new four-role system
     # --------------------------------------------------------
 
@@ -393,7 +415,7 @@ class RegisterWindow:
         )
 
         self.window.geometry(
-            "500x500"
+            "500x600"
         )
 
         self.window.resizable(
@@ -822,9 +844,17 @@ class Dashboard:
 
             self.add_button(
                 buttons_frame,
+                "Network / Grid View",
+                self.open_network,
+                4,
+                0
+            )
+
+            self.add_button(
+                buttons_frame,
                 "Refresh Dashboard",
                 self.refresh_dashboard,
-                4,
+                5,
                 0
             )
 
@@ -832,7 +862,7 @@ class Dashboard:
                 buttons_frame,
                 "Logout",
                 self.logout,
-                4,
+                5,
                 1
             )
 
@@ -1115,6 +1145,12 @@ class Dashboard:
             self.root
         )
 
+    def open_network(self):
+
+        NetworkWindow(
+            self.root
+        )
+
     def logout(self):
 
         answer = messagebox.askyesno(
@@ -1142,111 +1178,121 @@ class OutageWindow:
 
         self.user = user
 
-        self.window = tk.Toplevel(
-            parent
-        )
-
-        self.window.title(
-            "GridCare-Lite - Outages"
-        )
-
-        self.window.geometry(
-            "1100x550"
-        )
+        self.window = tk.Toplevel(parent)
+        self.window.title("GridCare-Lite - Outages")
+        self.window.geometry("1350x650")
 
         ttk.Label(
             self.window,
             text="Outage Management",
             font=("Arial", 18, "bold")
-        ).pack(
-            pady=15
+        ).pack(pady=15)
+
+        # ----------------------------------------------------
+        # FILTERS
+        # ----------------------------------------------------
+
+        filter_frame = ttk.Frame(self.window)
+        filter_frame.pack(fill="x", padx=15, pady=5)
+
+        ttk.Label(filter_frame, text="Region:").pack(side="left", padx=5)
+
+        self.region_combo = ttk.Combobox(
+            filter_frame, state="readonly", width=28
+        )
+        self.region_combo.pack(side="left", padx=5)
+        self.region_combo.bind(
+            "<<ComboboxSelected>>",
+            lambda event: self.load_outages()
         )
 
+        ttk.Label(filter_frame, text="Status:").pack(side="left", padx=5)
+
+        self.status_combo = ttk.Combobox(
+            filter_frame, state="readonly", width=18,
+            values=["All Statuses", "Reported", "Open", "In Progress", "Resolved"]
+        )
+        self.status_combo.pack(side="left", padx=5)
+        self.status_combo.set("All Statuses")
+        self.status_combo.bind(
+            "<<ComboboxSelected>>",
+            lambda event: self.load_outages()
+        )
+
+        ttk.Button(
+            filter_frame, text="Clear Filters", command=self.clear_filters
+        ).pack(side="left", padx=5)
+
         columns = (
-            "id",
-            "substation",
-            "location",
-            "description",
-            "reported_by",
-            "date",
-            "priority",
-            "status"
+            "id", "substation", "region", "location", "description",
+            "reported_by", "date", "severity", "status"
         )
 
         self.tree = ttk.Treeview(
-            self.window,
-            columns=columns,
-            show="headings"
+            self.window, columns=columns, show="headings"
         )
 
         headings = {
             "id": "Outage ID",
             "substation": "Substation",
+            "region": "Region",
             "location": "Location",
             "description": "Description",
             "reported_by": "Reported By",
-            "date": "Date",
-            "priority": "Priority",
+            "date": "Timestamp",
+            "severity": "Severity",
             "status": "Status"
         }
 
         for column in columns:
+            self.tree.heading(column, text=headings[column])
+            self.tree.column(column, width=115)
 
-            self.tree.heading(
-                column,
-                text=headings[column]
-            )
+        self.tree.column("description", width=250)
+        self.tree.column("substation", width=180)
+        self.tree.column("region", width=150)
+        self.tree.column("date", width=155)
 
-            self.tree.column(
-                column,
-                width=110
-            )
+        self.tree.pack(fill="both", expand=True, padx=15, pady=10)
 
-        self.tree.column(
-            "description",
-            width=260
-        )
+        buttons = ttk.Frame(self.window)
+        buttons.pack(pady=10)
 
-        self.tree.pack(
-            fill="both",
-            expand=True,
-            padx=15,
-            pady=10
-        )
-
-        buttons = ttk.Frame(
-            self.window
-        )
-
-        buttons.pack(
-            pady=10
-        )
-
-        if self.user[2] in [
-            "Administrator",
-            "Engineer"
-        ]:
-
+        if self.user[2] in ["Administrator", "Engineer"]:
             ttk.Button(
-                buttons,
-                text="Update Status",
-                command=self.update_status
-            ).grid(
-                row=0,
-                column=0,
-                padx=5
-            )
+                buttons, text="Update Status", command=self.update_status
+            ).grid(row=0, column=0, padx=5)
 
         ttk.Button(
-            buttons,
-            text="Refresh",
-            command=self.load_outages
-        ).grid(
-            row=0,
-            column=1,
-            padx=5
+            buttons, text="Refresh", command=self.load_outages
+        ).grid(row=0, column=1, padx=5)
+
+        self.load_regions()
+        self.load_outages()
+
+    def load_regions(self):
+
+        db = connect_db()
+        cursor = db.cursor()
+
+        cursor.execute(
+            """
+            SELECT DISTINCT region
+            FROM substations
+            WHERE region IS NOT NULL AND TRIM(region) != ''
+            ORDER BY region
+            """
         )
 
+        regions = [row[0] for row in cursor.fetchall()]
+        db.close()
+
+        self.region_combo["values"] = ["All Regions"] + regions
+        self.region_combo.set("All Regions")
+
+    def clear_filters(self):
+        self.region_combo.set("All Regions")
+        self.status_combo.set("All Statuses")
         self.load_outages()
 
     def load_outages(self):
@@ -1254,14 +1300,17 @@ class OutageWindow:
         for item in self.tree.get_children():
             self.tree.delete(item)
 
+        region = self.region_combo.get()
+        status = self.status_combo.get()
+
         db = connect_db()
         cursor = db.cursor()
 
-        cursor.execute(
-            """
+        query = """
             SELECT
                 o.outage_id,
-                o.substation_id,
+                COALESCE(s.name, 'Unknown Substation'),
+                COALESCE(s.region, 'Unknown Region'),
                 o.location,
                 o.description,
                 u.name,
@@ -1269,44 +1318,45 @@ class OutageWindow:
                 o.priority,
                 o.status
             FROM outages o
+            LEFT JOIN substations s
+                ON o.substation_id = s.substation_id
             LEFT JOIN users u
                 ON o.reported_by = u.user_id
-            ORDER BY o.outage_id
-            """
-        )
+            WHERE 1 = 1
+        """
 
+        parameters = []
+
+        if region and region != "All Regions":
+            query += " AND s.region = ?"
+            parameters.append(region)
+
+        if status and status != "All Statuses":
+            query += " AND o.status = ?"
+            parameters.append(status)
+
+        query += " ORDER BY o.outage_id"
+
+        cursor.execute(query, parameters)
         outages = cursor.fetchall()
-
         db.close()
 
         for outage in outages:
-
-            self.tree.insert(
-                "",
-                "end",
-                values=outage
-            )
+            self.tree.insert("", "end", values=outage)
 
     def update_status(self):
 
         selected = self.tree.selection()
 
         if not selected:
-
             messagebox.showerror(
-                "Error",
-                "Please select an outage first."
+                "Error", "Please select an outage first."
             )
-
             return
 
-        values = self.tree.item(
-            selected[0],
-            "values"
-        )
-
+        values = self.tree.item(selected[0], "values")
         outage_id = values[0]
-        current_status = values[7]
+        current_status = values[8]
 
         StatusWindow(
             self.window,
@@ -1648,9 +1698,10 @@ class ReportOutageWindow:
                 substation_id,
                 substation_code,
                 name,
-                location
+                location,
+                region
             FROM substations
-            ORDER BY substation_id
+            ORDER BY region, name
             """
         )
 
@@ -1665,7 +1716,8 @@ class ReportOutageWindow:
             text = (
                 f"{substation[1]} - "
                 f"{substation[2]} - "
-                f"{substation[3]}"
+                f"{substation[3]} - "
+                f"{substation[4]}"
             )
 
             values.append(text)
@@ -1797,6 +1849,7 @@ class WorkOrderWindow:
             "outage",
             "technician",
             "date",
+            "scheduled",
             "status",
             "description"
         )
@@ -1811,7 +1864,8 @@ class WorkOrderWindow:
             "id": "Work Order",
             "outage": "Outage",
             "technician": "Technician",
-            "date": "Date",
+            "date": "Created",
+            "scheduled": "Scheduled Date",
             "status": "Status",
             "description": "Description"
         }
@@ -1905,6 +1959,7 @@ class WorkOrderWindow:
                 w.outage_id,
                 COALESCE(t.name, 'Unassigned'),
                 w.date_created,
+                w.scheduled_date,
                 w.status,
                 w.description
             FROM work_orders w
@@ -1952,7 +2007,7 @@ class WorkOrderWindow:
         )
 
         work_order_id = values[0]
-        current_status = values[4]
+        current_status = values[5]
 
         WorkOrderStatusWindow(
             self.window,
@@ -2022,6 +2077,7 @@ class MyWorkOrderWindow:
             "id",
             "outage",
             "date",
+            "scheduled",
             "status",
             "description"
         )
@@ -2035,7 +2091,8 @@ class MyWorkOrderWindow:
         headings = {
             "id": "Work Order",
             "outage": "Outage",
-            "date": "Date",
+            "date": "Created",
+            "scheduled": "Scheduled Date",
             "status": "Status",
             "description": "Description"
         }
@@ -2132,6 +2189,7 @@ class MyWorkOrderWindow:
                 work_order_id,
                 outage_id,
                 date_created,
+                scheduled_date,
                 status,
                 description
             FROM work_orders
@@ -2436,6 +2494,15 @@ class CreateWorkOrderWindow:
 
         ttk.Label(
             frame,
+            text="Scheduled Date (YYYY-MM-DD):"
+        ).pack(anchor="w")
+
+        self.scheduled_date_entry = ttk.Entry(frame)
+        self.scheduled_date_entry.pack(fill="x", pady=5)
+        self.scheduled_date_entry.insert(0, datetime.now().strftime("%Y-%m-%d"))
+
+        ttk.Label(
+            frame,
             text="Work Description:"
         ).pack(
             anchor="w"
@@ -2561,6 +2628,17 @@ class CreateWorkOrderWindow:
 
             return
 
+        scheduled_date = self.scheduled_date_entry.get().strip()
+
+        try:
+            datetime.strptime(scheduled_date, "%Y-%m-%d")
+        except ValueError:
+            messagebox.showerror(
+                "Invalid Date",
+                "Please enter the scheduled date in YYYY-MM-DD format."
+            )
+            return
+
         description = (
             self.description_entry
             .get("1.0", "end")
@@ -2597,16 +2675,18 @@ class CreateWorkOrderWindow:
                 outage_id,
                 technician_id,
                 date_created,
+                scheduled_date,
                 status,
                 description
             )
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
             (
                 outage_id,
                 technician_id,
                 date_created,
-                "Pending",
+                scheduled_date,
+                "Scheduled",
                 description
             )
         )
@@ -4278,6 +4358,412 @@ class AdminCreateUserWindow:
 
 
 # ============================================================
+# NETWORK / GRID VIEW
+# ============================================================
+
+class NetworkWindow:
+
+    def __init__(self, parent):
+
+        self.window = tk.Toplevel(parent)
+
+        self.window.title(
+            "GridCare-Lite - Network / Grid View"
+        )
+
+        self.window.geometry(
+            "1250x700"
+        )
+
+        ttk.Label(
+            self.window,
+            text="GridCare-Lite Network / Grid View",
+            font=("Arial", 20, "bold")
+        ).pack(
+            pady=15
+        )
+
+        summary_frame = ttk.Frame(
+            self.window
+        )
+
+        summary_frame.pack(
+            fill="x",
+            padx=20,
+            pady=5
+        )
+
+        self.summary_label = ttk.Label(
+            summary_frame,
+            text=""
+        )
+
+        self.summary_label.pack(
+            anchor="w"
+        )
+
+        filter_frame = ttk.Frame(
+            self.window
+        )
+
+        filter_frame.pack(
+            fill="x",
+            padx=20,
+            pady=10
+        )
+
+        ttk.Label(
+            filter_frame,
+            text="Filter by Region:"
+        ).pack(
+            side="left",
+            padx=5
+        )
+
+        self.region_combo = ttk.Combobox(
+            filter_frame,
+            state="readonly",
+            width=35
+        )
+
+        self.region_combo.pack(
+            side="left",
+            padx=5
+        )
+
+        self.region_combo.bind(
+            "<<ComboboxSelected>>",
+            lambda event: self.load_substations()
+        )
+
+        ttk.Button(
+            filter_frame,
+            text="Show All",
+            command=self.show_all_regions
+        ).pack(
+            side="left",
+            padx=5
+        )
+
+        ttk.Button(
+            filter_frame,
+            text="Refresh",
+            command=self.refresh
+        ).pack(
+            side="left",
+            padx=5
+        )
+
+        self.notebook = ttk.Notebook(
+            self.window
+        )
+
+        self.notebook.pack(
+            fill="both",
+            expand=True,
+            padx=20,
+            pady=10
+        )
+
+        self.substation_frame = ttk.Frame(
+            self.notebook
+        )
+
+        self.notebook.add(
+            self.substation_frame,
+            text="Substations"
+        )
+
+        substation_columns = (
+            "id",
+            "code",
+            "name",
+            "location",
+            "region"
+        )
+
+        self.substation_tree = ttk.Treeview(
+            self.substation_frame,
+            columns=substation_columns,
+            show="headings"
+        )
+
+        substation_headings = {
+            "id": "ID",
+            "code": "Code",
+            "name": "Substation Name",
+            "location": "Location",
+            "region": "Region"
+        }
+
+        for column in substation_columns:
+
+            self.substation_tree.heading(
+                column,
+                text=substation_headings[column]
+            )
+
+            self.substation_tree.column(
+                column,
+                width=180
+            )
+
+        self.substation_tree.column(
+            "id",
+            width=70
+        )
+
+        self.substation_tree.pack(
+            fill="both",
+            expand=True,
+            padx=10,
+            pady=10
+        )
+
+        self.line_frame = ttk.Frame(
+            self.notebook
+        )
+
+        self.notebook.add(
+            self.line_frame,
+            text="Transmission Lines"
+        )
+
+        line_columns = (
+            "id",
+            "utility",
+            "source",
+            "destination",
+            "voltage",
+            "length",
+            "capacity",
+            "status",
+            "type"
+        )
+
+        self.line_tree = ttk.Treeview(
+            self.line_frame,
+            columns=line_columns,
+            show="headings"
+        )
+
+        line_headings = {
+            "id": "Line ID",
+            "utility": "Utility",
+            "source": "Source Substation",
+            "destination": "Destination Substation",
+            "voltage": "Voltage (kV)",
+            "length": "Length (km)",
+            "capacity": "Capacity (MVA)",
+            "status": "Status",
+            "type": "Line Type"
+        }
+
+        for column in line_columns:
+
+            self.line_tree.heading(
+                column,
+                text=line_headings[column]
+            )
+
+            self.line_tree.column(
+                column,
+                width=130
+            )
+
+        self.line_tree.column(
+            "source",
+            width=190
+        )
+
+        self.line_tree.column(
+            "destination",
+            width=190
+        )
+
+        self.line_tree.pack(
+            fill="both",
+            expand=True,
+            padx=10,
+            pady=10
+        )
+
+        self.load_regions()
+        self.load_summary()
+        self.load_substations()
+        self.load_lines()
+
+    def load_regions(self):
+
+        db = connect_db()
+        cursor = db.cursor()
+
+        cursor.execute(
+            """
+            SELECT DISTINCT region
+            FROM substations
+            WHERE region IS NOT NULL
+            AND TRIM(region) != ''
+            ORDER BY region
+            """
+        )
+
+        regions = [
+            row[0]
+            for row in cursor.fetchall()
+        ]
+
+        db.close()
+
+        values = ["All Regions"]
+        values.extend(regions)
+
+        self.region_combo["values"] = values
+        self.region_combo.set("All Regions")
+
+    def load_summary(self):
+
+        db = connect_db()
+        cursor = db.cursor()
+
+        cursor.execute(
+            "SELECT COUNT(*) FROM substations"
+        )
+
+        substation_count = cursor.fetchone()[0]
+
+        cursor.execute(
+            "SELECT COUNT(DISTINCT region) FROM substations"
+        )
+
+        region_count = cursor.fetchone()[0]
+
+        cursor.execute(
+            "SELECT COUNT(*) FROM lines"
+        )
+
+        line_count = cursor.fetchone()[0]
+
+        db.close()
+
+        self.summary_label.config(
+            text=(
+                f"Substations: {substation_count}    |    "
+                f"Regions: {region_count}    |    "
+                f"Transmission Lines: {line_count}"
+            )
+        )
+
+    def load_substations(self):
+
+        for item in self.substation_tree.get_children():
+            self.substation_tree.delete(item)
+
+        region = self.region_combo.get()
+
+        db = connect_db()
+        cursor = db.cursor()
+
+        if region and region != "All Regions":
+
+            cursor.execute(
+                """
+                SELECT
+                    substation_id,
+                    substation_code,
+                    name,
+                    location,
+                    region
+                FROM substations
+                WHERE region = ?
+                ORDER BY name
+                """,
+                (region,)
+            )
+
+        else:
+
+            cursor.execute(
+                """
+                SELECT
+                    substation_id,
+                    substation_code,
+                    name,
+                    location,
+                    region
+                FROM substations
+                ORDER BY region, name
+                """
+            )
+
+        substations = cursor.fetchall()
+        db.close()
+
+        for substation in substations:
+
+            self.substation_tree.insert(
+                "",
+                "end",
+                values=substation
+            )
+
+    def load_lines(self):
+
+        for item in self.line_tree.get_children():
+            self.line_tree.delete(item)
+
+        db = connect_db()
+        cursor = db.cursor()
+
+        cursor.execute(
+            """
+            SELECT
+                l.line_id,
+                l.utility_id,
+                COALESCE(s1.name, 'Unknown Substation'),
+                COALESCE(s2.name, 'Unknown Substation'),
+                l.voltage_kv,
+                l.length_km,
+                l.capacity_mva,
+                l.status,
+                l.line_type
+            FROM lines l
+            LEFT JOIN substations s1
+                ON l.source_substation_id = s1.substation_id
+            LEFT JOIN substations s2
+                ON l.destination_substation_id = s2.substation_id
+            ORDER BY l.line_id
+            """
+        )
+
+        lines = cursor.fetchall()
+        db.close()
+
+        for line in lines:
+
+            self.line_tree.insert(
+                "",
+                "end",
+                values=line
+            )
+
+    def show_all_regions(self):
+
+        self.region_combo.set(
+            "All Regions"
+        )
+
+        self.load_substations()
+
+    def refresh(self):
+
+        self.load_regions()
+        self.load_summary()
+        self.load_substations()
+        self.load_lines()
+
+
+# ============================================================
 # REPORTS WINDOW
 # ============================================================
 
@@ -4383,15 +4869,17 @@ class ReportsWindow:
                 f"{average_hours:.2f} hours"
             )
 
-        # Outages by location/region
+        # Outages by actual substation region
         cursor.execute(
             """
             SELECT
-                location,
-                COUNT(*)
-            FROM outages
-            GROUP BY location
-            ORDER BY COUNT(*) DESC
+                COALESCE(s.region, 'Unknown Region') AS region,
+                COUNT(*) AS outage_count
+            FROM outages o
+            LEFT JOIN substations s
+                ON o.substation_id = s.substation_id
+            GROUP BY s.region
+            ORDER BY outage_count DESC
             """
         )
 
@@ -4431,7 +4919,7 @@ class ReportsWindow:
 
         self.report_text.insert(
             "end",
-            "OUTAGES BY REGION / LOCATION\n"
+            "OUTAGES BY REGION\n"
         )
 
         self.report_text.insert(
