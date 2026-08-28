@@ -9,62 +9,52 @@ DATABASE_NAME = "gridcare.db"
 
 
 # ============================================================
-# DATABASE CONNECTION AND SETUP
+# DATABASE CONNECTION
 # ============================================================
 
 def connect_db():
-    return sqlite3.connect(DATABASE_NAME)
+    db = sqlite3.connect(DATABASE_NAME)
+    db.execute("PRAGMA foreign_keys = ON")
+    return db
 
+
+# ============================================================
+# PASSWORD FUNCTIONS
+# ============================================================
 
 def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
+    return hashlib.sha256(
+        password.encode("utf-8")
+    ).hexdigest()
 
 
-def setup_database():
+def check_password(stored_password, entered_password):
     """
-    Makes small compatibility changes to the existing database.
-    Existing data is preserved.
+    Supports both:
+    1. Old plain-text passwords already in the database
+    2. New hashed passwords
     """
+
+    hashed = hash_password(entered_password)
+
+    if stored_password == hashed:
+        return True
+
+    # Support old accounts created before this version
+    if stored_password == entered_password:
+        return True
+
+    return False
+
+
+# ============================================================
+# DATABASE PREPARATION
+# ============================================================
+
+def prepare_database():
 
     db = connect_db()
     cursor = db.cursor()
-
-    # --------------------------------------------------------
-    # Add password_hash if it does not already exist
-    # --------------------------------------------------------
-
-    cursor.execute("PRAGMA table_info(users)")
-    user_columns = [row[1] for row in cursor.fetchall()]
-
-    if "password_hash" not in user_columns:
-        cursor.execute(
-            "ALTER TABLE users ADD COLUMN password_hash TEXT"
-        )
-
-    # --------------------------------------------------------
-    # Add scheduled_date to work_orders
-    # --------------------------------------------------------
-
-    cursor.execute("PRAGMA table_info(work_orders)")
-    work_order_columns = [row[1] for row in cursor.fetchall()]
-
-    if "scheduled_date" not in work_order_columns:
-        cursor.execute(
-            "ALTER TABLE work_orders ADD COLUMN scheduled_date TEXT"
-        )
-
-    # --------------------------------------------------------
-    # Add user_id to technicians
-    # This connects a technician account to a technician record.
-    # --------------------------------------------------------
-
-    cursor.execute("PRAGMA table_info(technicians)")
-    technician_columns = [row[1] for row in cursor.fetchall()]
-
-    if "user_id" not in technician_columns:
-        cursor.execute(
-            "ALTER TABLE technicians ADD COLUMN user_id INTEGER"
-        )
 
     # --------------------------------------------------------
     # Make sure complaints table exists
@@ -86,52 +76,46 @@ def setup_database():
     )
 
     # --------------------------------------------------------
-    # Convert old role names to lecturer-required roles
+    # Add user_id to technicians if it does not exist
+    # --------------------------------------------------------
+
+    cursor.execute(
+        "PRAGMA table_info(technicians)"
+    )
+
+    technician_columns = [
+        row[1]
+        for row in cursor.fetchall()
+    ]
+
+    if "user_id" not in technician_columns:
+
+        cursor.execute(
+            """
+            ALTER TABLE technicians
+            ADD COLUMN user_id INTEGER
+            """
+        )
+
+    # --------------------------------------------------------
+    # Convert old roles to the new four-role system
     # --------------------------------------------------------
 
     cursor.execute(
         """
         UPDATE users
-        SET role = 'admin'
-        WHERE LOWER(role) = 'manager'
+        SET role = 'Administrator'
+        WHERE role = 'Manager'
         """
     )
 
     cursor.execute(
         """
         UPDATE users
-        SET role = 'customer_service'
-        WHERE LOWER(role) = 'customer'
+        SET role = 'Customer Service'
+        WHERE role = 'Customer'
         """
     )
-
-    # --------------------------------------------------------
-    # Create password hashes for existing users
-    # --------------------------------------------------------
-
-    cursor.execute(
-        """
-        SELECT user_id, password
-        FROM users
-        WHERE password_hash IS NULL
-        """
-    )
-
-    users_without_hash = cursor.fetchall()
-
-    for user_id, password in users_without_hash:
-        if password is not None:
-            cursor.execute(
-                """
-                UPDATE users
-                SET password_hash = ?
-                WHERE user_id = ?
-                """,
-                (
-                    hash_password(password),
-                    user_id
-                )
-            )
 
     db.commit()
     db.close()
@@ -147,16 +131,27 @@ class LoginWindow:
 
         self.root = root
 
-        self.root.title("GridCare-Lite - Login")
-        self.root.geometry("480x420")
-        self.root.resizable(False, False)
+        self.root.title(
+            "GridCare-Lite - Login"
+        )
+
+        self.root.geometry(
+            "450x400"
+        )
+
+        self.root.resizable(
+            False,
+            False
+        )
 
         frame = ttk.Frame(
             self.root,
             padding=30
         )
 
-        frame.pack(expand=True)
+        frame.pack(
+            expand=True
+        )
 
         ttk.Label(
             frame,
@@ -244,8 +239,6 @@ class LoginWindow:
             pady=10
         )
 
-        self.username_entry.focus()
-
         self.root.bind(
             "<Return>",
             lambda event: self.login()
@@ -253,12 +246,23 @@ class LoginWindow:
 
     def open_register(self):
 
-        RegisterWindow(self.root)
+        RegisterWindow(
+            self.root
+        )
 
     def login(self):
 
-        username = self.username_entry.get().strip()
-        password = self.password_entry.get().strip()
+        username = (
+            self.username_entry
+            .get()
+            .strip()
+        )
+
+        password = (
+            self.password_entry
+            .get()
+            .strip()
+        )
 
         if not username or not password:
 
@@ -279,7 +283,6 @@ class LoginWindow:
                 name,
                 role,
                 username,
-                password_hash,
                 password
             FROM users
             WHERE username = ?
@@ -303,26 +306,30 @@ class LoginWindow:
         user_id = user[0]
         name = user[1]
         role = user[2]
-        stored_hash = user[4]
-        old_password = user[5]
+        username = user[3]
+        stored_password = user[4]
 
-        password_valid = False
+        if not check_password(
+            stored_password,
+            password
+        ):
 
-        # New password verification
-        if stored_hash:
-            password_valid = (
-                hash_password(password) == stored_hash
+            db.close()
+
+            messagebox.showerror(
+                "Login Failed",
+                "Incorrect username or password."
             )
 
-        # Compatibility with old database passwords
-        if not password_valid and old_password == password:
+            return
 
-            password_valid = True
+        # Upgrade old plain-text password
+        if stored_password == password:
 
             cursor.execute(
                 """
                 UPDATE users
-                SET password_hash = ?
+                SET password = ?
                 WHERE user_id = ?
                 """,
                 (
@@ -335,28 +342,37 @@ class LoginWindow:
 
         db.close()
 
-        if not password_valid:
+        # ----------------------------------------------------
+        # Check role
+        # ----------------------------------------------------
+
+        valid_roles = [
+            "Administrator",
+            "Engineer",
+            "Technician",
+            "Customer Service"
+        ]
+
+        if role not in valid_roles:
 
             messagebox.showerror(
                 "Login Failed",
-                "Incorrect username or password."
+                "This account has an invalid role."
             )
 
             return
-
-        user_data = (
-            user_id,
-            name,
-            role,
-            username
-        )
 
         for widget in self.root.winfo_children():
             widget.destroy()
 
         Dashboard(
             self.root,
-            user_data
+            (
+                user_id,
+                name,
+                role,
+                username
+            )
         )
 
 
@@ -368,14 +384,22 @@ class RegisterWindow:
 
     def __init__(self, parent):
 
-        self.window = tk.Toplevel(parent)
+        self.window = tk.Toplevel(
+            parent
+        )
 
         self.window.title(
             "GridCare-Lite - Create Account"
         )
 
-        self.window.geometry("480x450")
-        self.window.resizable(False, False)
+        self.window.geometry(
+            "500x500"
+        )
+
+        self.window.resizable(
+            False,
+            False
+        )
 
         frame = ttk.Frame(
             self.window,
@@ -464,7 +488,7 @@ class RegisterWindow:
 
         ttk.Label(
             frame,
-            text="Role:"
+            text="Account Type:"
         ).grid(
             row=4,
             column=0,
@@ -475,16 +499,12 @@ class RegisterWindow:
         self.role_combo = ttk.Combobox(
             frame,
             values=[
-                "engineer",
-                "technician",
-                "customer_service"
+                "Engineer",
+                "Technician",
+                "Customer Service"
             ],
             state="readonly",
             width=28
-        )
-
-        self.role_combo.set(
-            "customer_service"
         )
 
         self.role_combo.grid(
@@ -493,15 +513,22 @@ class RegisterWindow:
             pady=8
         )
 
+        self.role_combo.set(
+            "Engineer"
+        )
+
         ttk.Label(
             frame,
-            text="Administrator accounts can only be created by an administrator.",
-            wraplength=350
+            text=(
+                "Administrator accounts cannot be created "
+                "through public registration."
+            ),
+            wraplength=400
         ).grid(
             row=5,
             column=0,
             columnspan=2,
-            pady=10
+            pady=15
         )
 
         ttk.Button(
@@ -512,21 +539,49 @@ class RegisterWindow:
             row=6,
             column=0,
             columnspan=2,
-            pady=15
+            pady=20
         )
 
     def register(self):
 
-        name = self.name_entry.get().strip()
-        username = self.username_entry.get().strip()
-        password = self.password_entry.get().strip()
+        name = (
+            self.name_entry
+            .get()
+            .strip()
+        )
+
+        username = (
+            self.username_entry
+            .get()
+            .strip()
+        )
+
+        password = (
+            self.password_entry
+            .get()
+            .strip()
+        )
+
         role = self.role_combo.get()
 
-        if not name or not username or not password or not role:
+        if not name or not username or not password:
 
             messagebox.showerror(
                 "Registration Failed",
                 "Please complete all fields."
+            )
+
+            return
+
+        if role not in [
+            "Engineer",
+            "Technician",
+            "Customer Service"
+        ]:
+
+            messagebox.showerror(
+                "Registration Failed",
+                "Please select a valid account type."
             )
 
             return
@@ -554,39 +609,71 @@ class RegisterWindow:
 
             return
 
+        password_hash = hash_password(
+            password
+        )
+
         cursor.execute(
             """
             INSERT INTO users (
                 name,
                 role,
                 username,
-                password,
-                password_hash
+                password
             )
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?)
             """,
             (
                 name,
                 role,
                 username,
-                password,
-                hash_password(password)
+                password_hash
             )
         )
+
+        user_id = cursor.lastrowid
+
+        # ----------------------------------------------------
+        # If registering a technician, also create technician
+        # record and connect it to the user account.
+        # ----------------------------------------------------
+
+        if role == "Technician":
+
+            cursor.execute(
+                """
+                INSERT INTO technicians (
+                    name,
+                    specialization,
+                    availability,
+                    user_id
+                )
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    name,
+                    "General Electrical",
+                    "Available",
+                    user_id
+                )
+            )
 
         db.commit()
         db.close()
 
         messagebox.showinfo(
             "Registration Successful",
-            "Your account has been created successfully."
+            (
+                f"{role} account created successfully.\n\n"
+                "You can now log in."
+            )
         )
 
         self.window.destroy()
 
 
 # ============================================================
-# DASHBOARD
+# MAIN DASHBOARD
 # ============================================================
 
 class Dashboard:
@@ -602,26 +689,14 @@ class Dashboard:
         self.username = user[3]
 
         self.root.title(
-            f"GridCare-Lite - {self.get_role_name()} Dashboard"
+            f"GridCare-Lite - {self.role} Dashboard"
         )
 
-        self.root.geometry("950x700")
+        self.root.geometry(
+            "950x700"
+        )
 
         self.build_dashboard()
-
-    def get_role_name(self):
-
-        role_names = {
-            "admin": "Administrator",
-            "engineer": "Engineer",
-            "technician": "Technician",
-            "customer_service": "Customer Service"
-        }
-
-        return role_names.get(
-            self.role,
-            self.role
-        )
 
     def build_dashboard(self):
 
@@ -644,7 +719,7 @@ class Dashboard:
 
         ttk.Label(
             header,
-            text=f"Welcome, {self.name} ({self.get_role_name()})"
+            text=f"Welcome, {self.name} ({self.role})"
         ).pack(
             side="right"
         )
@@ -661,21 +736,25 @@ class Dashboard:
 
         ttk.Label(
             content,
-            text=f"{self.get_role_name()} Dashboard",
+            text=f"{self.role} Dashboard",
             font=("Arial", 18, "bold")
         ).pack(
             pady=15
         )
 
-        buttons_frame = ttk.Frame(content)
+        buttons_frame = ttk.Frame(
+            content
+        )
 
-        buttons_frame.pack(pady=10)
+        buttons_frame.pack(
+            pady=10
+        )
 
-        # ====================================================
+        # ----------------------------------------------------
         # ADMINISTRATOR
-        # ====================================================
+        # ----------------------------------------------------
 
-        if self.role == "admin":
+        if self.role == "Administrator":
 
             self.add_button(
                 buttons_frame,
@@ -719,7 +798,7 @@ class Dashboard:
 
             self.add_button(
                 buttons_frame,
-                "Complaints",
+                "Customer Complaints",
                 self.open_complaints,
                 2,
                 1
@@ -741,11 +820,40 @@ class Dashboard:
                 1
             )
 
-        # ====================================================
-        # ENGINEER
-        # ====================================================
+            self.add_button(
+                buttons_frame,
+                "Refresh Dashboard",
+                self.refresh_dashboard,
+                4,
+                0
+            )
 
-        elif self.role == "engineer":
+            self.add_button(
+                buttons_frame,
+                "Logout",
+                self.logout,
+                4,
+                1
+            )
+
+            self.summary_frame = ttk.LabelFrame(
+                content,
+                text="System Summary",
+                padding=20
+            )
+
+            self.summary_frame.pack(
+                fill="x",
+                pady=15
+            )
+
+            self.load_summary()
+
+        # ----------------------------------------------------
+        # ENGINEER
+        # ----------------------------------------------------
+
+        elif self.role == "Engineer":
 
             self.add_button(
                 buttons_frame,
@@ -773,47 +881,47 @@ class Dashboard:
 
             self.add_button(
                 buttons_frame,
-                "Reports",
-                self.open_reports,
+                "Logout",
+                self.logout,
                 1,
                 1
             )
 
-        # ====================================================
+        # ----------------------------------------------------
         # TECHNICIAN
-        # ====================================================
+        # ----------------------------------------------------
 
-        elif self.role == "technician":
+        elif self.role == "Technician":
 
             self.add_button(
                 buttons_frame,
                 "My Work Orders",
-                self.open_technician_work_orders,
+                self.open_my_work_orders,
                 0,
                 0
             )
 
             self.add_button(
                 buttons_frame,
-                "View Outages",
-                self.open_outages,
+                "Update / Complete Assigned Work",
+                self.open_my_work_orders,
                 0,
                 1
             )
 
             self.add_button(
                 buttons_frame,
-                "Maintenance",
-                self.open_maintenance,
+                "Logout",
+                self.logout,
                 1,
                 0
             )
 
-        # ====================================================
+        # ----------------------------------------------------
         # CUSTOMER SERVICE
-        # ====================================================
+        # ----------------------------------------------------
 
-        elif self.role == "customer_service":
+        elif self.role == "Customer Service":
 
             self.add_button(
                 buttons_frame,
@@ -825,52 +933,19 @@ class Dashboard:
 
             self.add_button(
                 buttons_frame,
-                "Log Customer Complaint",
-                self.open_complaint_form,
+                "Customer Complaints",
+                self.open_complaints,
                 0,
                 1
             )
 
             self.add_button(
                 buttons_frame,
-                "View Complaints",
-                self.open_complaints,
+                "Logout",
+                self.logout,
                 1,
                 0
             )
-
-        # ====================================================
-        # REFRESH / LOGOUT
-        # ====================================================
-
-        self.add_button(
-            buttons_frame,
-            "Refresh Dashboard",
-            self.refresh_dashboard,
-            4,
-            0
-        )
-
-        self.add_button(
-            buttons_frame,
-            "Logout",
-            self.logout,
-            4,
-            1
-        )
-
-        self.summary_frame = ttk.LabelFrame(
-            content,
-            text="System Summary",
-            padding=20
-        )
-
-        self.summary_frame.pack(
-            fill="x",
-            pady=15
-        )
-
-        self.load_summary()
 
     def add_button(
         self,
@@ -884,14 +959,18 @@ class Dashboard:
         ttk.Button(
             parent,
             text=text,
-            width=25,
+            width=28,
             command=command
         ).grid(
             row=row,
             column=column,
             padx=10,
-            pady=8
+            pady=10
         )
+
+    # --------------------------------------------------------
+    # DASHBOARD FUNCTIONS
+    # --------------------------------------------------------
 
     def load_summary(self):
 
@@ -936,97 +1015,12 @@ class Dashboard:
         total_maintenance = cursor.fetchone()[0]
 
         cursor.execute(
-            "SELECT COUNT(*) FROM complaints"
+            "SELECT COUNT(*) FROM status_updates"
         )
 
-        total_complaints = cursor.fetchone()[0]
-
-        # Average resolution time in days
-        cursor.execute(
-            """
-            SELECT AVG(
-                julianday(
-                    datetime(
-                        date_reported || ' 00:00:00'
-                    )
-                )
-            )
-            FROM outages
-            WHERE status = 'Resolved'
-            """
-        )
-
-        # Calculate average resolution from status history
-        cursor.execute(
-            """
-            SELECT outage_id
-            FROM outages
-            WHERE status = 'Resolved'
-            """
-        )
-
-        resolved_ids = [
-            row[0] for row in cursor.fetchall()
-        ]
-
-        resolution_times = []
-
-        for outage_id in resolved_ids:
-
-            cursor.execute(
-                """
-                SELECT
-                    o.date_reported,
-                    MAX(s.update_time)
-                FROM outages o
-                JOIN status_updates s
-                    ON o.outage_id = s.outage_id
-                WHERE o.outage_id = ?
-                AND s.new_status = 'Resolved'
-                """,
-                (outage_id,)
-            )
-
-            result = cursor.fetchone()
-
-            if result and result[0] and result[1]:
-
-                try:
-
-                    start = datetime.strptime(
-                        result[0],
-                        "%Y-%m-%d"
-                    )
-
-                    end = datetime.strptime(
-                        result[1],
-                        "%Y-%m-%d %H:%M:%S"
-                    )
-
-                    resolution_times.append(
-                        (end - start).total_seconds()
-                        / 86400
-                    )
-
-                except ValueError:
-                    pass
+        total_updates = cursor.fetchone()[0]
 
         db.close()
-
-        if resolution_times:
-
-            average_resolution = (
-                sum(resolution_times)
-                / len(resolution_times)
-            )
-
-            average_text = (
-                f"{average_resolution:.2f} days"
-            )
-
-        else:
-
-            average_text = "No resolved outages yet"
 
         summary = [
             f"Total Outages: {total_outages}",
@@ -1034,8 +1028,7 @@ class Dashboard:
             f"Work Orders: {total_work_orders}",
             f"Technicians: {total_technicians}",
             f"Maintenance Records: {total_maintenance}",
-            f"Customer Complaints: {total_complaints}",
-            f"Average Resolution Time: {average_text}"
+            f"Status Updates: {total_updates}"
         ]
 
         for item in summary:
@@ -1056,6 +1049,10 @@ class Dashboard:
             "Dashboard Refreshed",
             "Dashboard information has been refreshed."
         )
+
+    # --------------------------------------------------------
+    # WINDOWS
+    # --------------------------------------------------------
 
     def open_outages(self):
 
@@ -1079,6 +1076,13 @@ class Dashboard:
             self.user
         )
 
+    def open_my_work_orders(self):
+
+        MyWorkOrderWindow(
+            self.root,
+            self.user
+        )
+
     def open_technicians(self):
 
         TechnicianWindow(
@@ -1098,31 +1102,17 @@ class Dashboard:
             self.user
         )
 
-    def open_complaint_form(self):
-
-        ComplaintEntryWindow(
-            self.root,
-            self.user,
-            self.refresh_dashboard
-        )
-
     def open_users(self):
 
         UserManagementWindow(
-            self.root
+            self.root,
+            self.user
         )
 
     def open_reports(self):
 
         ReportsWindow(
             self.root
-        )
-
-    def open_technician_work_orders(self):
-
-        TechnicianWorkOrderWindow(
-            self.root,
-            self.user
         )
 
     def logout(self):
@@ -1137,7 +1127,9 @@ class Dashboard:
             for widget in self.root.winfo_children():
                 widget.destroy()
 
-            LoginWindow(self.root)
+            LoginWindow(
+                self.root
+            )
 
 
 # ============================================================
@@ -1150,24 +1142,29 @@ class OutageWindow:
 
         self.user = user
 
-        self.window = tk.Toplevel(parent)
+        self.window = tk.Toplevel(
+            parent
+        )
 
         self.window.title(
             "GridCare-Lite - Outages"
         )
 
-        self.window.geometry("1150x600")
+        self.window.geometry(
+            "1100x550"
+        )
 
         ttk.Label(
             self.window,
             text="Outage Management",
             font=("Arial", 18, "bold")
-        ).pack(pady=15)
+        ).pack(
+            pady=15
+        )
 
         columns = (
             "id",
             "substation",
-            "region",
             "location",
             "description",
             "reported_by",
@@ -1185,12 +1182,11 @@ class OutageWindow:
         headings = {
             "id": "Outage ID",
             "substation": "Substation",
-            "region": "Region",
             "location": "Location",
             "description": "Description",
             "reported_by": "Reported By",
             "date": "Date",
-            "priority": "Severity",
+            "priority": "Priority",
             "status": "Status"
         }
 
@@ -1203,12 +1199,12 @@ class OutageWindow:
 
             self.tree.column(
                 column,
-                width=105
+                width=110
             )
 
         self.tree.column(
             "description",
-            width=240
+            width=260
         )
 
         self.tree.pack(
@@ -1218,14 +1214,18 @@ class OutageWindow:
             pady=10
         )
 
-        buttons = ttk.Frame(self.window)
+        buttons = ttk.Frame(
+            self.window
+        )
 
-        buttons.pack(pady=10)
+        buttons.pack(
+            pady=10
+        )
 
-        if user[2] in (
-            "admin",
-            "engineer"
-        ):
+        if self.user[2] in [
+            "Administrator",
+            "Engineer"
+        ]:
 
             ttk.Button(
                 buttons,
@@ -1262,16 +1262,15 @@ class OutageWindow:
             SELECT
                 o.outage_id,
                 o.substation_id,
-                s.location,
                 o.location,
                 o.description,
-                o.reported_by,
+                u.name,
                 o.date_reported,
                 o.priority,
                 o.status
             FROM outages o
-            LEFT JOIN substations s
-                ON o.substation_id = s.substation_id
+            LEFT JOIN users u
+                ON o.reported_by = u.user_id
             ORDER BY o.outage_id
             """
         )
@@ -1307,7 +1306,7 @@ class OutageWindow:
         )
 
         outage_id = values[0]
-        current_status = values[8]
+        current_status = values[7]
 
         StatusWindow(
             self.window,
@@ -1337,13 +1336,17 @@ class StatusWindow:
         self.user_id = user_id
         self.refresh_callback = refresh_callback
 
-        self.window = tk.Toplevel(parent)
+        self.window = tk.Toplevel(
+            parent
+        )
 
         self.window.title(
             "Update Outage Status"
         )
 
-        self.window.geometry("400x250")
+        self.window.geometry(
+            "400x250"
+        )
 
         frame = ttk.Frame(
             self.window,
@@ -1359,17 +1362,23 @@ class StatusWindow:
             frame,
             text=f"Outage #{outage_id}",
             font=("Arial", 16, "bold")
-        ).pack(pady=10)
+        ).pack(
+            pady=10
+        )
 
         ttk.Label(
             frame,
             text=f"Current Status: {current_status}"
-        ).pack(pady=5)
+        ).pack(
+            pady=5
+        )
 
         ttk.Label(
             frame,
             text="New Status:"
-        ).pack(anchor="w")
+        ).pack(
+            anchor="w"
+        )
 
         self.status_combo = ttk.Combobox(
             frame,
@@ -1386,13 +1395,17 @@ class StatusWindow:
             pady=5
         )
 
-        self.status_combo.set(current_status)
+        self.status_combo.set(
+            current_status
+        )
 
         ttk.Button(
             frame,
             text="Update Status",
             command=self.submit
-        ).pack(pady=15)
+        ).pack(
+            pady=15
+        )
 
     def submit(self):
 
@@ -1439,10 +1452,6 @@ class StatusWindow:
 
             return
 
-        update_time = datetime.now().strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
-
         cursor.execute(
             """
             UPDATE outages
@@ -1453,6 +1462,10 @@ class StatusWindow:
                 new_status,
                 self.outage_id
             )
+        )
+
+        update_time = datetime.now().strftime(
+            "%Y-%m-%d %H:%M:%S"
         )
 
         cursor.execute(
@@ -1484,6 +1497,7 @@ class StatusWindow:
         )
 
         self.refresh_callback()
+
         self.window.destroy()
 
 
@@ -1503,13 +1517,17 @@ class ReportOutageWindow:
         self.user = user
         self.refresh_callback = refresh_callback
 
-        self.window = tk.Toplevel(parent)
+        self.window = tk.Toplevel(
+            parent
+        )
 
         self.window.title(
             "GridCare-Lite - Report Outage"
         )
 
-        self.window.geometry("520x550")
+        self.window.geometry(
+            "500x500"
+        )
 
         frame = ttk.Frame(
             self.window,
@@ -1525,12 +1543,16 @@ class ReportOutageWindow:
             frame,
             text="Report New Outage",
             font=("Arial", 18, "bold")
-        ).pack(pady=10)
+        ).pack(
+            pady=10
+        )
 
         ttk.Label(
             frame,
             text="Substation:"
-        ).pack(anchor="w")
+        ).pack(
+            anchor="w"
+        )
 
         self.substation_combo = ttk.Combobox(
             frame,
@@ -1550,9 +1572,13 @@ class ReportOutageWindow:
         ttk.Label(
             frame,
             text="Location:"
-        ).pack(anchor="w")
+        ).pack(
+            anchor="w"
+        )
 
-        self.location_entry = ttk.Entry(frame)
+        self.location_entry = ttk.Entry(
+            frame
+        )
 
         self.location_entry.pack(
             fill="x",
@@ -1562,7 +1588,9 @@ class ReportOutageWindow:
         ttk.Label(
             frame,
             text="Description:"
-        ).pack(anchor="w")
+        ).pack(
+            anchor="w"
+        )
 
         self.description_entry = tk.Text(
             frame,
@@ -1577,7 +1605,9 @@ class ReportOutageWindow:
         ttk.Label(
             frame,
             text="Severity:"
-        ).pack(anchor="w")
+        ).pack(
+            anchor="w"
+        )
 
         self.priority_combo = ttk.Combobox(
             frame,
@@ -1590,7 +1620,9 @@ class ReportOutageWindow:
             state="readonly"
         )
 
-        self.priority_combo.set("Medium")
+        self.priority_combo.set(
+            "Medium"
+        )
 
         self.priority_combo.pack(
             fill="x",
@@ -1601,7 +1633,9 @@ class ReportOutageWindow:
             frame,
             text="Report Outage",
             command=self.submit
-        ).pack(pady=20)
+        ).pack(
+            pady=20
+        )
 
     def load_substations(self):
 
@@ -1628,11 +1662,13 @@ class ReportOutageWindow:
 
         for substation in self.substation_data:
 
-            values.append(
+            text = (
                 f"{substation[1]} - "
                 f"{substation[2]} - "
                 f"{substation[3]}"
             )
+
+            values.append(text)
 
         self.substation_combo["values"] = values
 
@@ -1641,7 +1677,9 @@ class ReportOutageWindow:
 
     def submit(self):
 
-        selected_index = self.substation_combo.current()
+        selected_index = (
+            self.substation_combo.current()
+        )
 
         if selected_index == -1:
 
@@ -1652,7 +1690,11 @@ class ReportOutageWindow:
 
             return
 
-        location = self.location_entry.get().strip()
+        location = (
+            self.location_entry
+            .get()
+            .strip()
+        )
 
         description = (
             self.description_entry
@@ -1676,7 +1718,7 @@ class ReportOutageWindow:
         ][0]
 
         date_reported = datetime.now().strftime(
-            "%Y-%m-%d"
+            "%Y-%m-%d %H:%M:%S"
         )
 
         db = connect_db()
@@ -1716,11 +1758,12 @@ class ReportOutageWindow:
         )
 
         self.refresh_callback()
+
         self.window.destroy()
 
 
 # ============================================================
-# WORK ORDER WINDOW
+# WORK ORDER WINDOW - ADMINISTRATOR
 # ============================================================
 
 class WorkOrderWindow:
@@ -1729,26 +1772,31 @@ class WorkOrderWindow:
 
         self.user = user
 
-        self.window = tk.Toplevel(parent)
+        self.window = tk.Toplevel(
+            parent
+        )
 
         self.window.title(
             "GridCare-Lite - Work Orders"
         )
 
-        self.window.geometry("1100x600")
+        self.window.geometry(
+            "1000x600"
+        )
 
         ttk.Label(
             self.window,
             text="Work Order Management",
             font=("Arial", 18, "bold")
-        ).pack(pady=15)
+        ).pack(
+            pady=15
+        )
 
         columns = (
             "id",
             "outage",
             "technician",
             "date",
-            "scheduled",
             "status",
             "description"
         )
@@ -1763,8 +1811,7 @@ class WorkOrderWindow:
             "id": "Work Order",
             "outage": "Outage",
             "technician": "Technician",
-            "date": "Created",
-            "scheduled": "Scheduled Date",
+            "date": "Date",
             "status": "Status",
             "description": "Description"
         }
@@ -1778,12 +1825,12 @@ class WorkOrderWindow:
 
             self.tree.column(
                 column,
-                width=125
+                width=130
             )
 
         self.tree.column(
             "description",
-            width=250
+            width=300
         )
 
         self.tree.pack(
@@ -1793,13 +1840,17 @@ class WorkOrderWindow:
             pady=10
         )
 
-        buttons = ttk.Frame(self.window)
+        buttons = ttk.Frame(
+            self.window
+        )
 
-        buttons.pack(pady=10)
+        buttons.pack(
+            pady=10
+        )
 
         ttk.Button(
             buttons,
-            text="Create / Assign Work Order",
+            text="Create Work Order",
             command=self.create_work_order
         ).grid(
             row=0,
@@ -1854,7 +1905,6 @@ class WorkOrderWindow:
                 w.outage_id,
                 COALESCE(t.name, 'Unassigned'),
                 w.date_created,
-                COALESCE(w.scheduled_date, ''),
                 w.status,
                 w.description
             FROM work_orders w
@@ -1901,10 +1951,13 @@ class WorkOrderWindow:
             "values"
         )
 
+        work_order_id = values[0]
+        current_status = values[4]
+
         WorkOrderStatusWindow(
             self.window,
-            values[0],
-            values[5],
+            work_order_id,
+            current_status,
             self.load_work_orders
         )
 
@@ -1926,11 +1979,371 @@ class WorkOrderWindow:
             "values"
         )
 
+        work_order_id = values[0]
+
         MaintenanceEntryWindow(
             self.window,
-            values[0],
+            work_order_id,
             self.load_work_orders
         )
+
+
+# ============================================================
+# MY WORK ORDERS - TECHNICIAN
+# ============================================================
+
+class MyWorkOrderWindow:
+
+    def __init__(self, parent, user):
+
+        self.user = user
+
+        self.window = tk.Toplevel(
+            parent
+        )
+
+        self.window.title(
+            "GridCare-Lite - My Work Orders"
+        )
+
+        self.window.geometry(
+            "1000x550"
+        )
+
+        ttk.Label(
+            self.window,
+            text="My Assigned Work Orders",
+            font=("Arial", 18, "bold")
+        ).pack(
+            pady=15
+        )
+
+        columns = (
+            "id",
+            "outage",
+            "date",
+            "status",
+            "description"
+        )
+
+        self.tree = ttk.Treeview(
+            self.window,
+            columns=columns,
+            show="headings"
+        )
+
+        headings = {
+            "id": "Work Order",
+            "outage": "Outage",
+            "date": "Date",
+            "status": "Status",
+            "description": "Description"
+        }
+
+        for column in columns:
+
+            self.tree.heading(
+                column,
+                text=headings[column]
+            )
+
+            self.tree.column(
+                column,
+                width=150
+            )
+
+        self.tree.column(
+            "description",
+            width=350
+        )
+
+        self.tree.pack(
+            fill="both",
+            expand=True,
+            padx=15,
+            pady=10
+        )
+
+        buttons = ttk.Frame(
+            self.window
+        )
+
+        buttons.pack(
+            pady=10
+        )
+
+        ttk.Button(
+            buttons,
+            text="Update / Complete Work",
+            command=self.update_work
+        ).grid(
+            row=0,
+            column=0,
+            padx=5
+        )
+
+        ttk.Button(
+            buttons,
+            text="Refresh",
+            command=self.load_work_orders
+        ).grid(
+            row=0,
+            column=1,
+            padx=5
+        )
+
+        self.load_work_orders()
+
+    def load_work_orders(self):
+
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+
+        db = connect_db()
+        cursor = db.cursor()
+
+        cursor.execute(
+            """
+            SELECT technician_id
+            FROM technicians
+            WHERE user_id = ?
+            """,
+            (self.user[0],)
+        )
+
+        technician = cursor.fetchone()
+
+        if technician is None:
+
+            db.close()
+
+            messagebox.showwarning(
+                "No Technician Record",
+                "No technician record is linked to this account."
+            )
+
+            return
+
+        technician_id = technician[0]
+
+        cursor.execute(
+            """
+            SELECT
+                work_order_id,
+                outage_id,
+                date_created,
+                status,
+                description
+            FROM work_orders
+            WHERE technician_id = ?
+            ORDER BY work_order_id
+            """,
+            (technician_id,)
+        )
+
+        work_orders = cursor.fetchall()
+
+        db.close()
+
+        for work_order in work_orders:
+
+            self.tree.insert(
+                "",
+                "end",
+                values=work_order
+            )
+
+    def update_work(self):
+
+        selected = self.tree.selection()
+
+        if not selected:
+
+            messagebox.showerror(
+                "Error",
+                "Please select one of your work orders."
+            )
+
+            return
+
+        values = self.tree.item(
+            selected[0],
+            "values"
+        )
+
+        work_order_id = values[0]
+        current_status = values[3]
+
+        TechnicianWorkWindow(
+            self.window,
+            self.user,
+            work_order_id,
+            current_status,
+            self.load_work_orders
+        )
+
+
+# ============================================================
+# TECHNICIAN WORK UPDATE
+# ============================================================
+
+class TechnicianWorkWindow:
+
+    def __init__(
+        self,
+        parent,
+        user,
+        work_order_id,
+        current_status,
+        refresh_callback
+    ):
+
+        self.user = user
+        self.work_order_id = work_order_id
+        self.refresh_callback = refresh_callback
+
+        self.window = tk.Toplevel(
+            parent
+        )
+
+        self.window.title(
+            "Update Assigned Work"
+        )
+
+        self.window.geometry(
+            "450x300"
+        )
+
+        frame = ttk.Frame(
+            self.window,
+            padding=25
+        )
+
+        frame.pack(
+            fill="both",
+            expand=True
+        )
+
+        ttk.Label(
+            frame,
+            text=f"Work Order #{work_order_id}",
+            font=("Arial", 16, "bold")
+        ).pack(
+            pady=10
+        )
+
+        ttk.Label(
+            frame,
+            text="Status:"
+        ).pack(
+            anchor="w"
+        )
+
+        self.status_combo = ttk.Combobox(
+            frame,
+            values=[
+                "Pending",
+                "Scheduled",
+                "In Progress",
+                "Completed"
+            ],
+            state="readonly"
+        )
+
+        self.status_combo.set(
+            current_status
+        )
+
+        self.status_combo.pack(
+            fill="x",
+            pady=8
+        )
+
+        ttk.Label(
+            frame,
+            text="Work Notes:"
+        ).pack(
+            anchor="w"
+        )
+
+        self.notes_entry = tk.Text(
+            frame,
+            height=5
+        )
+
+        self.notes_entry.pack(
+            fill="x",
+            pady=8
+        )
+
+        ttk.Button(
+            frame,
+            text="Save Update",
+            command=self.submit
+        ).pack(
+            pady=10
+        )
+
+    def submit(self):
+
+        new_status = self.status_combo.get()
+
+        if not new_status:
+            return
+
+        db = connect_db()
+        cursor = db.cursor()
+
+        # Verify that the work order belongs to this technician
+        cursor.execute(
+            """
+            SELECT w.work_order_id
+            FROM work_orders w
+            JOIN technicians t
+                ON w.technician_id = t.technician_id
+            WHERE w.work_order_id = ?
+            AND t.user_id = ?
+            """,
+            (
+                self.work_order_id,
+                self.user[0]
+            )
+        )
+
+        if cursor.fetchone() is None:
+
+            db.close()
+
+            messagebox.showerror(
+                "Access Denied",
+                "You are not assigned to this work order."
+            )
+
+            return
+
+        cursor.execute(
+            """
+            UPDATE work_orders
+            SET status = ?
+            WHERE work_order_id = ?
+            """,
+            (
+                new_status,
+                self.work_order_id
+            )
+        )
+
+        db.commit()
+        db.close()
+
+        messagebox.showinfo(
+            "Success",
+            "Your work order has been updated successfully."
+        )
+
+        self.refresh_callback()
+
+        self.window.destroy()
 
 
 # ============================================================
@@ -1939,17 +2352,25 @@ class WorkOrderWindow:
 
 class CreateWorkOrderWindow:
 
-    def __init__(self, parent, refresh_callback):
+    def __init__(
+        self,
+        parent,
+        refresh_callback
+    ):
 
         self.refresh_callback = refresh_callback
 
-        self.window = tk.Toplevel(parent)
+        self.window = tk.Toplevel(
+            parent
+        )
 
         self.window.title(
             "Create Work Order"
         )
 
-        self.window.geometry("520x550")
+        self.window.geometry(
+            "500x500"
+        )
 
         frame = ttk.Frame(
             self.window,
@@ -1965,12 +2386,16 @@ class CreateWorkOrderWindow:
             frame,
             text="Create Work Order",
             font=("Arial", 18, "bold")
-        ).pack(pady=10)
+        ).pack(
+            pady=10
+        )
 
         ttk.Label(
             frame,
             text="Outage:"
-        ).pack(anchor="w")
+        ).pack(
+            anchor="w"
+        )
 
         self.outage_combo = ttk.Combobox(
             frame,
@@ -1990,7 +2415,9 @@ class CreateWorkOrderWindow:
         ttk.Label(
             frame,
             text="Technician:"
-        ).pack(anchor="w")
+        ).pack(
+            anchor="w"
+        )
 
         self.technician_combo = ttk.Combobox(
             frame,
@@ -2009,25 +2436,10 @@ class CreateWorkOrderWindow:
 
         ttk.Label(
             frame,
-            text="Scheduled Date (YYYY-MM-DD):"
-        ).pack(anchor="w")
-
-        self.scheduled_entry = ttk.Entry(frame)
-
-        self.scheduled_entry.pack(
-            fill="x",
-            pady=5
-        )
-
-        self.scheduled_entry.insert(
-            0,
-            datetime.now().strftime("%Y-%m-%d")
-        )
-
-        ttk.Label(
-            frame,
             text="Work Description:"
-        ).pack(anchor="w")
+        ).pack(
+            anchor="w"
+        )
 
         self.description_entry = tk.Text(
             frame,
@@ -2043,7 +2455,9 @@ class CreateWorkOrderWindow:
             frame,
             text="Create Work Order",
             command=self.submit
-        ).pack(pady=20)
+        ).pack(
+            pady=20
+        )
 
     def load_outages(self):
 
@@ -2055,6 +2469,7 @@ class CreateWorkOrderWindow:
             SELECT
                 outage_id,
                 location,
+                description,
                 status
             FROM outages
             WHERE status != 'Resolved'
@@ -2073,7 +2488,7 @@ class CreateWorkOrderWindow:
             values.append(
                 f"Outage #{outage[0]} - "
                 f"{outage[1]} - "
-                f"{outage[2]}"
+                f"{outage[3]}"
             )
 
         self.outage_combo["values"] = values
@@ -2120,8 +2535,13 @@ class CreateWorkOrderWindow:
 
     def submit(self):
 
-        outage_index = self.outage_combo.current()
-        technician_index = self.technician_combo.current()
+        outage_index = (
+            self.outage_combo.current()
+        )
+
+        technician_index = (
+            self.technician_combo.current()
+        )
 
         if outage_index == -1:
 
@@ -2137,28 +2557,6 @@ class CreateWorkOrderWindow:
             messagebox.showerror(
                 "Error",
                 "Please select a technician."
-            )
-
-            return
-
-        scheduled_date = (
-            self.scheduled_entry
-            .get()
-            .strip()
-        )
-
-        try:
-
-            datetime.strptime(
-                scheduled_date,
-                "%Y-%m-%d"
-            )
-
-        except ValueError:
-
-            messagebox.showerror(
-                "Error",
-                "Scheduled date must use YYYY-MM-DD."
             )
 
             return
@@ -2199,18 +2597,16 @@ class CreateWorkOrderWindow:
                 outage_id,
                 technician_id,
                 date_created,
-                scheduled_date,
                 status,
                 description
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?)
             """,
             (
                 outage_id,
                 technician_id,
                 date_created,
-                scheduled_date,
-                "Scheduled",
+                "Pending",
                 description
             )
         )
@@ -2227,6 +2623,7 @@ class CreateWorkOrderWindow:
         )
 
         self.refresh_callback()
+
         self.window.destroy()
 
 
@@ -2247,13 +2644,17 @@ class WorkOrderStatusWindow:
         self.work_order_id = work_order_id
         self.refresh_callback = refresh_callback
 
-        self.window = tk.Toplevel(parent)
+        self.window = tk.Toplevel(
+            parent
+        )
 
         self.window.title(
             "Update Work Order Status"
         )
 
-        self.window.geometry("400x250")
+        self.window.geometry(
+            "400x250"
+        )
 
         frame = ttk.Frame(
             self.window,
@@ -2269,12 +2670,23 @@ class WorkOrderStatusWindow:
             frame,
             text=f"Work Order #{work_order_id}",
             font=("Arial", 16, "bold")
-        ).pack(pady=10)
+        ).pack(
+            pady=10
+        )
 
         ttk.Label(
             frame,
             text=f"Current Status: {current_status}"
-        ).pack(pady=5)
+        ).pack(
+            pady=5
+        )
+
+        ttk.Label(
+            frame,
+            text="New Status:"
+        ).pack(
+            anchor="w"
+        )
 
         self.status_combo = ttk.Combobox(
             frame,
@@ -2300,14 +2712,13 @@ class WorkOrderStatusWindow:
             frame,
             text="Update Status",
             command=self.submit
-        ).pack(pady=15)
+        ).pack(
+            pady=15
+        )
 
     def submit(self):
 
         new_status = self.status_combo.get()
-
-        if not new_status:
-            return
 
         db = connect_db()
         cursor = db.cursor()
@@ -2344,6 +2755,7 @@ class WorkOrderStatusWindow:
         )
 
         self.refresh_callback()
+
         self.window.destroy()
 
 
@@ -2355,19 +2767,25 @@ class TechnicianWindow:
 
     def __init__(self, parent):
 
-        self.window = tk.Toplevel(parent)
+        self.window = tk.Toplevel(
+            parent
+        )
 
         self.window.title(
             "GridCare-Lite - Technicians"
         )
 
-        self.window.geometry("850x550")
+        self.window.geometry(
+            "850x500"
+        )
 
         ttk.Label(
             self.window,
             text="Technician Management",
             font=("Arial", 18, "bold")
-        ).pack(pady=15)
+        ).pack(
+            pady=15
+        )
 
         columns = (
             "id",
@@ -2414,7 +2832,9 @@ class TechnicianWindow:
             self.window
         )
 
-        buttons.pack(pady=10)
+        buttons.pack(
+            pady=10
+        )
 
         ttk.Button(
             buttons,
@@ -2485,17 +2905,25 @@ class TechnicianWindow:
 
 class AddTechnicianWindow:
 
-    def __init__(self, parent, refresh_callback):
+    def __init__(
+        self,
+        parent,
+        refresh_callback
+    ):
 
         self.refresh_callback = refresh_callback
 
-        self.window = tk.Toplevel(parent)
+        self.window = tk.Toplevel(
+            parent
+        )
 
         self.window.title(
             "Add Technician"
         )
 
-        self.window.geometry("450x450")
+        self.window.geometry(
+            "450x450"
+        )
 
         frame = ttk.Frame(
             self.window,
@@ -2511,14 +2939,20 @@ class AddTechnicianWindow:
             frame,
             text="Add Technician",
             font=("Arial", 18, "bold")
-        ).pack(pady=10)
+        ).pack(
+            pady=10
+        )
 
         ttk.Label(
             frame,
             text="Name:"
-        ).pack(anchor="w")
+        ).pack(
+            anchor="w"
+        )
 
-        self.name_entry = ttk.Entry(frame)
+        self.name_entry = ttk.Entry(
+            frame
+        )
 
         self.name_entry.pack(
             fill="x",
@@ -2528,9 +2962,13 @@ class AddTechnicianWindow:
         ttk.Label(
             frame,
             text="Phone:"
-        ).pack(anchor="w")
+        ).pack(
+            anchor="w"
+        )
 
-        self.phone_entry = ttk.Entry(frame)
+        self.phone_entry = ttk.Entry(
+            frame
+        )
 
         self.phone_entry.pack(
             fill="x",
@@ -2540,9 +2978,13 @@ class AddTechnicianWindow:
         ttk.Label(
             frame,
             text="Specialization:"
-        ).pack(anchor="w")
+        ).pack(
+            anchor="w"
+        )
 
-        self.specialization_entry = ttk.Entry(frame)
+        self.specialization_entry = ttk.Entry(
+            frame
+        )
 
         self.specialization_entry.pack(
             fill="x",
@@ -2552,7 +2994,9 @@ class AddTechnicianWindow:
         ttk.Label(
             frame,
             text="Availability:"
-        ).pack(anchor="w")
+        ).pack(
+            anchor="w"
+        )
 
         self.availability_combo = ttk.Combobox(
             frame,
@@ -2577,12 +3021,24 @@ class AddTechnicianWindow:
             frame,
             text="Add Technician",
             command=self.submit
-        ).pack(pady=20)
+        ).pack(
+            pady=20
+        )
 
     def submit(self):
 
-        name = self.name_entry.get().strip()
-        phone = self.phone_entry.get().strip()
+        name = (
+            self.name_entry
+            .get()
+            .strip()
+        )
+
+        phone = (
+            self.phone_entry
+            .get()
+            .strip()
+        )
+
         specialization = (
             self.specialization_entry
             .get()
@@ -2635,215 +3091,8 @@ class AddTechnicianWindow:
         )
 
         self.refresh_callback()
+
         self.window.destroy()
-
-
-# ============================================================
-# TECHNICIAN WORK ORDER WINDOW
-# ============================================================
-
-class TechnicianWorkOrderWindow:
-
-    def __init__(self, parent, user):
-
-        self.user = user
-
-        self.window = tk.Toplevel(parent)
-
-        self.window.title(
-            "My Work Orders"
-        )
-
-        self.window.geometry("950x550")
-
-        ttk.Label(
-            self.window,
-            text="My Assigned Work Orders",
-            font=("Arial", 18, "bold")
-        ).pack(pady=15)
-
-        columns = (
-            "id",
-            "outage",
-            "scheduled",
-            "status",
-            "description"
-        )
-
-        self.tree = ttk.Treeview(
-            self.window,
-            columns=columns,
-            show="headings"
-        )
-
-        headings = {
-            "id": "Work Order",
-            "outage": "Outage",
-            "scheduled": "Scheduled Date",
-            "status": "Status",
-            "description": "Description"
-        }
-
-        for column in columns:
-
-            self.tree.heading(
-                column,
-                text=headings[column]
-            )
-
-            self.tree.column(
-                column,
-                width=150
-            )
-
-        self.tree.column(
-            "description",
-            width=300
-        )
-
-        self.tree.pack(
-            fill="both",
-            expand=True,
-            padx=15,
-            pady=10
-        )
-
-        buttons = ttk.Frame(self.window)
-
-        buttons.pack(pady=10)
-
-        ttk.Button(
-            buttons,
-            text="Mark Complete",
-            command=self.mark_complete
-        ).grid(
-            row=0,
-            column=0,
-            padx=5
-        )
-
-        ttk.Button(
-            buttons,
-            text="Refresh",
-            command=self.load_orders
-        ).grid(
-            row=0,
-            column=1,
-            padx=5
-        )
-
-        self.load_orders()
-
-    def find_technician_id(self):
-
-        db = connect_db()
-        cursor = db.cursor()
-
-        cursor.execute(
-            """
-            SELECT technician_id
-            FROM technicians
-            WHERE user_id = ?
-            """,
-            (self.user[0],)
-        )
-
-        result = cursor.fetchone()
-
-        db.close()
-
-        if result:
-            return result[0]
-
-        return None
-
-    def load_orders(self):
-
-        for item in self.tree.get_children():
-            self.tree.delete(item)
-
-        technician_id = self.find_technician_id()
-
-        if technician_id is None:
-
-            ttk.Label(
-                self.window,
-                text="This account has not yet been linked to a technician record."
-            ).pack()
-
-            return
-
-        db = connect_db()
-        cursor = db.cursor()
-
-        cursor.execute(
-            """
-            SELECT
-                work_order_id,
-                outage_id,
-                scheduled_date,
-                status,
-                description
-            FROM work_orders
-            WHERE technician_id = ?
-            ORDER BY work_order_id
-            """,
-            (technician_id,)
-        )
-
-        orders = cursor.fetchall()
-
-        db.close()
-
-        for order in orders:
-
-            self.tree.insert(
-                "",
-                "end",
-                values=order
-            )
-
-    def mark_complete(self):
-
-        selected = self.tree.selection()
-
-        if not selected:
-
-            messagebox.showerror(
-                "Error",
-                "Please select a work order."
-            )
-
-            return
-
-        values = self.tree.item(
-            selected[0],
-            "values"
-        )
-
-        work_order_id = values[0]
-
-        db = connect_db()
-        cursor = db.cursor()
-
-        cursor.execute(
-            """
-            UPDATE work_orders
-            SET status = 'Completed'
-            WHERE work_order_id = ?
-            """,
-            (work_order_id,)
-        )
-
-        db.commit()
-        db.close()
-
-        messagebox.showinfo(
-            "Success",
-            "Work order marked as completed."
-        )
-
-        self.load_orders()
 
 
 # ============================================================
@@ -2854,19 +3103,25 @@ class MaintenanceWindow:
 
     def __init__(self, parent):
 
-        self.window = tk.Toplevel(parent)
+        self.window = tk.Toplevel(
+            parent
+        )
 
         self.window.title(
             "GridCare-Lite - Maintenance"
         )
 
-        self.window.geometry("1100x500")
+        self.window.geometry(
+            "1100x500"
+        )
 
         ttk.Label(
             self.window,
             text="Maintenance Records",
             font=("Arial", 18, "bold")
-        ).pack(pady=15)
+        ).pack(
+            pady=15
+        )
 
         columns = (
             "id",
@@ -2927,7 +3182,9 @@ class MaintenanceWindow:
             self.window,
             text="Refresh",
             command=self.load_records
-        ).pack(pady=10)
+        ).pack(
+            pady=10
+        )
 
         self.load_records()
 
@@ -2983,13 +3240,17 @@ class MaintenanceEntryWindow:
         self.work_order_id = work_order_id
         self.refresh_callback = refresh_callback
 
-        self.window = tk.Toplevel(parent)
+        self.window = tk.Toplevel(
+            parent
+        )
 
         self.window.title(
             "Record Maintenance"
         )
 
-        self.window.geometry("500x550")
+        self.window.geometry(
+            "500x550"
+        )
 
         frame = ttk.Frame(
             self.window,
@@ -3005,12 +3266,16 @@ class MaintenanceEntryWindow:
             frame,
             text=f"Maintenance - Work Order #{work_order_id}",
             font=("Arial", 16, "bold")
-        ).pack(pady=10)
+        ).pack(
+            pady=10
+        )
 
         ttk.Label(
             frame,
             text="Technician:"
-        ).pack(anchor="w")
+        ).pack(
+            anchor="w"
+        )
 
         self.technician_combo = ttk.Combobox(
             frame,
@@ -3030,9 +3295,13 @@ class MaintenanceEntryWindow:
         ttk.Label(
             frame,
             text="Start Time:"
-        ).pack(anchor="w")
+        ).pack(
+            anchor="w"
+        )
 
-        self.start_entry = ttk.Entry(frame)
+        self.start_entry = ttk.Entry(
+            frame
+        )
 
         self.start_entry.pack(
             fill="x",
@@ -3049,9 +3318,13 @@ class MaintenanceEntryWindow:
         ttk.Label(
             frame,
             text="End Time:"
-        ).pack(anchor="w")
+        ).pack(
+            anchor="w"
+        )
 
-        self.end_entry = ttk.Entry(frame)
+        self.end_entry = ttk.Entry(
+            frame
+        )
 
         self.end_entry.pack(
             fill="x",
@@ -3061,7 +3334,9 @@ class MaintenanceEntryWindow:
         ttk.Label(
             frame,
             text="Action Taken:"
-        ).pack(anchor="w")
+        ).pack(
+            anchor="w"
+        )
 
         self.action_entry = tk.Text(
             frame,
@@ -3076,7 +3351,9 @@ class MaintenanceEntryWindow:
         ttk.Label(
             frame,
             text="Notes:"
-        ).pack(anchor="w")
+        ).pack(
+            anchor="w"
+        )
 
         self.notes_entry = tk.Text(
             frame,
@@ -3092,7 +3369,9 @@ class MaintenanceEntryWindow:
             frame,
             text="Save Maintenance Record",
             command=self.submit
-        ).pack(pady=15)
+        ).pack(
+            pady=15
+        )
 
     def load_technicians(self):
 
@@ -3131,7 +3410,9 @@ class MaintenanceEntryWindow:
 
     def submit(self):
 
-        technician_index = self.technician_combo.current()
+        technician_index = (
+            self.technician_combo.current()
+        )
 
         if technician_index == -1:
 
@@ -3142,8 +3423,17 @@ class MaintenanceEntryWindow:
 
             return
 
-        start_time = self.start_entry.get().strip()
-        end_time = self.end_entry.get().strip()
+        start_time = (
+            self.start_entry
+            .get()
+            .strip()
+        )
+
+        end_time = (
+            self.end_entry
+            .get()
+            .strip()
+        )
 
         action_taken = (
             self.action_entry
@@ -3203,10 +3493,14 @@ class MaintenanceEntryWindow:
 
         messagebox.showinfo(
             "Success",
-            f"Maintenance record #{maintenance_id} saved successfully."
+            (
+                f"Maintenance record #{maintenance_id} "
+                "saved successfully."
+            )
         )
 
         self.refresh_callback()
+
         self.window.destroy()
 
 
@@ -3220,19 +3514,25 @@ class ComplaintWindow:
 
         self.user = user
 
-        self.window = tk.Toplevel(parent)
-
-        self.window.title(
-            "Customer Complaints"
+        self.window = tk.Toplevel(
+            parent
         )
 
-        self.window.geometry("1050x550")
+        self.window.title(
+            "GridCare-Lite - Customer Complaints"
+        )
+
+        self.window.geometry(
+            "1050x600"
+        )
 
         ttk.Label(
             self.window,
-            text="Customer Complaint Management",
+            text="Customer Complaints",
             font=("Arial", 18, "bold")
-        ).pack(pady=15)
+        ).pack(
+            pady=15
+        )
 
         columns = (
             "id",
@@ -3284,24 +3584,23 @@ class ComplaintWindow:
             pady=10
         )
 
-        buttons = ttk.Frame(self.window)
+        buttons = ttk.Frame(
+            self.window
+        )
 
-        buttons.pack(pady=10)
+        buttons.pack(
+            pady=10
+        )
 
-        if user[2] in (
-            "admin",
-            "customer_service"
-        ):
-
-            ttk.Button(
-                buttons,
-                text="Log Complaint",
-                command=self.open_form
-            ).grid(
-                row=0,
-                column=0,
-                padx=5
-            )
+        ttk.Button(
+            buttons,
+            text="Log Complaint",
+            command=self.log_complaint
+        ).grid(
+            row=0,
+            column=0,
+            padx=5
+        )
 
         ttk.Button(
             buttons,
@@ -3330,7 +3629,7 @@ class ComplaintWindow:
                 customer_name,
                 customer_contact,
                 complaint_text,
-                COALESCE(outage_id, ''),
+                outage_id,
                 date_reported,
                 status
             FROM complaints
@@ -3350,7 +3649,7 @@ class ComplaintWindow:
                 values=complaint
             )
 
-    def open_form(self):
+    def log_complaint(self):
 
         ComplaintEntryWindow(
             self.window,
@@ -3375,13 +3674,17 @@ class ComplaintEntryWindow:
         self.user = user
         self.refresh_callback = refresh_callback
 
-        self.window = tk.Toplevel(parent)
+        self.window = tk.Toplevel(
+            parent
+        )
 
         self.window.title(
             "Log Customer Complaint"
         )
 
-        self.window.geometry("500x500")
+        self.window.geometry(
+            "500x550"
+        )
 
         frame = ttk.Frame(
             self.window,
@@ -3395,18 +3698,24 @@ class ComplaintEntryWindow:
 
         ttk.Label(
             frame,
-            text="Customer Complaint",
+            text="Log Customer Complaint",
             font=("Arial", 18, "bold")
-        ).pack(pady=10)
+        ).pack(
+            pady=10
+        )
 
         ttk.Label(
             frame,
             text="Customer Name:"
-        ).pack(anchor="w")
+        ).pack(
+            anchor="w"
+        )
 
-        self.name_entry = ttk.Entry(frame)
+        self.customer_entry = ttk.Entry(
+            frame
+        )
 
-        self.name_entry.pack(
+        self.customer_entry.pack(
             fill="x",
             pady=5
         )
@@ -3414,9 +3723,13 @@ class ComplaintEntryWindow:
         ttk.Label(
             frame,
             text="Customer Contact:"
-        ).pack(anchor="w")
+        ).pack(
+            anchor="w"
+        )
 
-        self.contact_entry = ttk.Entry(frame)
+        self.contact_entry = ttk.Entry(
+            frame
+        )
 
         self.contact_entry.pack(
             fill="x",
@@ -3425,8 +3738,10 @@ class ComplaintEntryWindow:
 
         ttk.Label(
             frame,
-            text="Related Outage (optional):"
-        ).pack(anchor="w")
+            text="Related Outage:"
+        ).pack(
+            anchor="w"
+        )
 
         self.outage_combo = ttk.Combobox(
             frame,
@@ -3445,7 +3760,9 @@ class ComplaintEntryWindow:
         ttk.Label(
             frame,
             text="Complaint:"
-        ).pack(anchor="w")
+        ).pack(
+            anchor="w"
+        )
 
         self.complaint_entry = tk.Text(
             frame,
@@ -3461,7 +3778,9 @@ class ComplaintEntryWindow:
             frame,
             text="Save Complaint",
             command=self.submit
-        ).pack(pady=15)
+        ).pack(
+            pady=15
+        )
 
     def load_outages(self):
 
@@ -3475,7 +3794,7 @@ class ComplaintEntryWindow:
                 location,
                 status
             FROM outages
-            ORDER BY outage_id DESC
+            ORDER BY outage_id
             """
         )
 
@@ -3483,7 +3802,9 @@ class ComplaintEntryWindow:
 
         db.close()
 
-        values = ["None"]
+        values = [
+            "No linked outage"
+        ]
 
         for outage in self.outage_data:
 
@@ -3494,12 +3815,22 @@ class ComplaintEntryWindow:
             )
 
         self.outage_combo["values"] = values
+
         self.outage_combo.current(0)
 
     def submit(self):
 
-        name = self.name_entry.get().strip()
-        contact = self.contact_entry.get().strip()
+        customer_name = (
+            self.customer_entry
+            .get()
+            .strip()
+        )
+
+        contact = (
+            self.contact_entry
+            .get()
+            .strip()
+        )
 
         complaint = (
             self.complaint_entry
@@ -3507,7 +3838,7 @@ class ComplaintEntryWindow:
             .strip()
         )
 
-        if not name or not complaint:
+        if not customer_name or not complaint:
 
             messagebox.showerror(
                 "Error",
@@ -3516,16 +3847,18 @@ class ComplaintEntryWindow:
 
             return
 
+        selected = self.outage_combo.current()
+
         outage_id = None
 
-        if self.outage_combo.current() > 0:
+        if selected > 0:
 
             outage_id = self.outage_data[
-                self.outage_combo.current() - 1
+                selected - 1
             ][0]
 
         date_reported = datetime.now().strftime(
-            "%Y-%m-%d"
+            "%Y-%m-%d %H:%M:%S"
         )
 
         db = connect_db()
@@ -3545,7 +3878,7 @@ class ComplaintEntryWindow:
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                name,
+                customer_name,
                 contact,
                 complaint,
                 outage_id,
@@ -3567,6 +3900,7 @@ class ComplaintEntryWindow:
         )
 
         self.refresh_callback()
+
         self.window.destroy()
 
 
@@ -3576,21 +3910,29 @@ class ComplaintEntryWindow:
 
 class UserManagementWindow:
 
-    def __init__(self, parent):
+    def __init__(self, parent, user):
 
-        self.window = tk.Toplevel(parent)
+        self.user = user
 
-        self.window.title(
-            "User Management"
+        self.window = tk.Toplevel(
+            parent
         )
 
-        self.window.geometry("800x500")
+        self.window.title(
+            "GridCare-Lite - User Management"
+        )
+
+        self.window.geometry(
+            "850x500"
+        )
 
         ttk.Label(
             self.window,
             text="User Management",
             font=("Arial", 18, "bold")
-        ).pack(pady=15)
+        ).pack(
+            pady=15
+        )
 
         columns = (
             "id",
@@ -3631,13 +3973,17 @@ class UserManagementWindow:
             pady=10
         )
 
-        buttons = ttk.Frame(self.window)
+        buttons = ttk.Frame(
+            self.window
+        )
 
-        buttons.pack(pady=10)
+        buttons.pack(
+            pady=10
+        )
 
         ttk.Button(
             buttons,
-            text="Create User",
+            text="Create Staff Account",
             command=self.create_user
         ).grid(
             row=0,
@@ -3691,29 +4037,37 @@ class UserManagementWindow:
 
     def create_user(self):
 
-        CreateUserWindow(
+        AdminCreateUserWindow(
             self.window,
             self.load_users
         )
 
 
 # ============================================================
-# CREATE USER WINDOW
+# ADMIN CREATE USER WINDOW
 # ============================================================
 
-class CreateUserWindow:
+class AdminCreateUserWindow:
 
-    def __init__(self, parent, refresh_callback):
+    def __init__(
+        self,
+        parent,
+        refresh_callback
+    ):
 
         self.refresh_callback = refresh_callback
 
-        self.window = tk.Toplevel(parent)
-
-        self.window.title(
-            "Create System User"
+        self.window = tk.Toplevel(
+            parent
         )
 
-        self.window.geometry("450x450")
+        self.window.title(
+            "Create Staff Account"
+        )
+
+        self.window.geometry(
+            "500x500"
+        )
 
         frame = ttk.Frame(
             self.window,
@@ -3727,16 +4081,22 @@ class CreateUserWindow:
 
         ttk.Label(
             frame,
-            text="Create System User",
+            text="Create Staff Account",
             font=("Arial", 18, "bold")
-        ).pack(pady=10)
+        ).pack(
+            pady=10
+        )
 
         ttk.Label(
             frame,
             text="Name:"
-        ).pack(anchor="w")
+        ).pack(
+            anchor="w"
+        )
 
-        self.name_entry = ttk.Entry(frame)
+        self.name_entry = ttk.Entry(
+            frame
+        )
 
         self.name_entry.pack(
             fill="x",
@@ -3746,9 +4106,13 @@ class CreateUserWindow:
         ttk.Label(
             frame,
             text="Username:"
-        ).pack(anchor="w")
+        ).pack(
+            anchor="w"
+        )
 
-        self.username_entry = ttk.Entry(frame)
+        self.username_entry = ttk.Entry(
+            frame
+        )
 
         self.username_entry.pack(
             fill="x",
@@ -3758,7 +4122,9 @@ class CreateUserWindow:
         ttk.Label(
             frame,
             text="Password:"
-        ).pack(anchor="w")
+        ).pack(
+            anchor="w"
+        )
 
         self.password_entry = ttk.Entry(
             frame,
@@ -3773,20 +4139,23 @@ class CreateUserWindow:
         ttk.Label(
             frame,
             text="Role:"
-        ).pack(anchor="w")
+        ).pack(
+            anchor="w"
+        )
 
         self.role_combo = ttk.Combobox(
             frame,
             values=[
-                "admin",
-                "engineer",
-                "technician",
-                "customer_service"
+                "Engineer",
+                "Technician",
+                "Customer Service"
             ],
             state="readonly"
         )
 
-        self.role_combo.set("engineer")
+        self.role_combo.set(
+            "Engineer"
+        )
 
         self.role_combo.pack(
             fill="x",
@@ -3795,18 +4164,35 @@ class CreateUserWindow:
 
         ttk.Button(
             frame,
-            text="Create User",
+            text="Create Account",
             command=self.submit
-        ).pack(pady=20)
+        ).pack(
+            pady=20
+        )
 
     def submit(self):
 
-        name = self.name_entry.get().strip()
-        username = self.username_entry.get().strip()
-        password = self.password_entry.get().strip()
+        name = (
+            self.name_entry
+            .get()
+            .strip()
+        )
+
+        username = (
+            self.username_entry
+            .get()
+            .strip()
+        )
+
+        password = (
+            self.password_entry
+            .get()
+            .strip()
+        )
+
         role = self.role_combo.get()
 
-        if not name or not username or not password or not role:
+        if not name or not username or not password:
 
             messagebox.showerror(
                 "Error",
@@ -3827,13 +4213,13 @@ class CreateUserWindow:
             (username,)
         )
 
-        if cursor.fetchone():
+        if cursor.fetchone() is not None:
 
             db.close()
 
             messagebox.showerror(
                 "Error",
-                "Username already exists."
+                "That username is already in use."
             )
 
             return
@@ -3844,37 +4230,35 @@ class CreateUserWindow:
                 name,
                 role,
                 username,
-                password,
-                password_hash
+                password
             )
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?)
             """,
             (
                 name,
                 role,
                 username,
-                password,
                 hash_password(password)
             )
         )
 
         user_id = cursor.lastrowid
 
-        # If creating a technician account, also create
-        # a technician record linked to the user.
-        if role == "technician":
+        if role == "Technician":
 
             cursor.execute(
                 """
                 INSERT INTO technicians (
                     name,
+                    specialization,
                     availability,
                     user_id
                 )
-                VALUES (?, ?, ?)
+                VALUES (?, ?, ?, ?)
                 """,
                 (
                     name,
+                    "General Electrical",
                     "Available",
                     user_id
                 )
@@ -3885,10 +4269,11 @@ class CreateUserWindow:
 
         messagebox.showinfo(
             "Success",
-            "User created successfully."
+            f"{role} account created successfully."
         )
 
         self.refresh_callback()
+
         self.window.destroy()
 
 
@@ -3900,251 +4285,175 @@ class ReportsWindow:
 
     def __init__(self, parent):
 
-        self.window = tk.Toplevel(parent)
+        self.window = tk.Toplevel(
+            parent
+        )
 
         self.window.title(
             "GridCare-Lite - Reports"
         )
 
-        self.window.geometry("850x600")
+        self.window.geometry(
+            "700x600"
+        )
 
         ttk.Label(
             self.window,
             text="GridCare-Lite Reports",
-            font=("Arial", 20, "bold")
-        ).pack(pady=15)
-
-        self.text = tk.Text(
-            self.window,
-            height=25,
-            width=95
+            font=("Arial", 18, "bold")
+        ).pack(
+            pady=15
         )
 
-        self.text.pack(
+        frame = ttk.Frame(
+            self.window,
+            padding=20
+        )
+
+        frame.pack(
             fill="both",
-            expand=True,
-            padx=20,
-            pady=10
+            expand=True
+        )
+
+        self.report_text = tk.Text(
+            frame,
+            height=25,
+            width=80
+        )
+
+        self.report_text.pack(
+            fill="both",
+            expand=True
         )
 
         ttk.Button(
             self.window,
             text="Refresh Report",
-            command=self.generate_report
-        ).pack(pady=10)
-
-        self.generate_report()
-
-    def generate_report(self):
-
-        self.text.delete(
-            "1.0",
-            "end"
+            command=self.load_report
+        ).pack(
+            pady=10
         )
+
+        self.load_report()
+
+    def load_report(self):
 
         db = connect_db()
         cursor = db.cursor()
 
-        # ----------------------------------------------------
-        # Overall outage counts
-        # ----------------------------------------------------
-
+        # Total and open outages
         cursor.execute(
-            """
-            SELECT
-                COUNT(*)
-            FROM outages
-            """
+            "SELECT COUNT(*) FROM outages"
         )
 
         total = cursor.fetchone()[0]
 
         cursor.execute(
             """
-            SELECT
-                COUNT(*)
+            SELECT COUNT(*)
             FROM outages
             WHERE status != 'Resolved'
             """
         )
 
-        open_count = cursor.fetchone()[0]
+        open_outages = cursor.fetchone()[0]
 
+        # Average resolution time
         cursor.execute(
             """
             SELECT
-                COUNT(*)
-            FROM outages
-            WHERE status = 'Resolved'
+                AVG(
+                    julianday(s.update_time)
+                    - julianday(o.date_reported)
+                )
+            FROM outages o
+            JOIN status_updates s
+                ON o.outage_id = s.outage_id
+            WHERE s.new_status = 'Resolved'
             """
         )
 
-        resolved_count = cursor.fetchone()[0]
+        average_days = cursor.fetchone()[0]
 
-        # ----------------------------------------------------
-        # Outages by region/location
-        # ----------------------------------------------------
+        if average_days is None:
+            average_text = "No resolved outages yet."
+        else:
+            average_hours = average_days * 24
+            average_text = (
+                f"{average_hours:.2f} hours"
+            )
 
+        # Outages by location/region
         cursor.execute(
             """
             SELECT
-                COALESCE(s.location, 'Unknown'),
+                location,
                 COUNT(*)
-            FROM outages o
-            LEFT JOIN substations s
-                ON o.substation_id = s.substation_id
-            GROUP BY s.location
+            FROM outages
+            GROUP BY location
             ORDER BY COUNT(*) DESC
             """
         )
 
         regions = cursor.fetchall()
 
-        # ----------------------------------------------------
-        # Work orders
-        # ----------------------------------------------------
-
-        cursor.execute(
-            """
-            SELECT
-                status,
-                COUNT(*)
-            FROM work_orders
-            GROUP BY status
-            """
-        )
-
-        work_orders = cursor.fetchall()
-
-        # ----------------------------------------------------
-        # Average resolution time
-        # ----------------------------------------------------
-
-        cursor.execute(
-            """
-            SELECT outage_id
-            FROM outages
-            WHERE status = 'Resolved'
-            """
-        )
-
-        resolved_ids = [
-            row[0]
-            for row in cursor.fetchall()
-        ]
-
-        resolution_times = []
-
-        for outage_id in resolved_ids:
-
-            cursor.execute(
-                """
-                SELECT
-                    o.date_reported,
-                    MAX(s.update_time)
-                FROM outages o
-                JOIN status_updates s
-                    ON o.outage_id = s.outage_id
-                WHERE o.outage_id = ?
-                AND s.new_status = 'Resolved'
-                """,
-                (outage_id,)
-            )
-
-            result = cursor.fetchone()
-
-            if result and result[0] and result[1]:
-
-                try:
-
-                    start = datetime.strptime(
-                        result[0],
-                        "%Y-%m-%d"
-                    )
-
-                    end = datetime.strptime(
-                        result[1],
-                        "%Y-%m-%d %H:%M:%S"
-                    )
-
-                    resolution_times.append(
-                        (
-                            end - start
-                        ).total_seconds() / 86400
-                    )
-
-                except ValueError:
-                    pass
-
         db.close()
 
-        if resolution_times:
+        self.report_text.delete(
+            "1.0",
+            "end"
+        )
 
-            average = (
-                sum(resolution_times)
-                / len(resolution_times)
-            )
+        self.report_text.insert(
+            "end",
+            "GRIDCARE-LITE BASIC REPORT\n"
+        )
 
-            average_text = (
-                f"{average:.2f} days"
+        self.report_text.insert(
+            "end",
+            "============================\n\n"
+        )
+
+        self.report_text.insert(
+            "end",
+            f"Total Outages: {total}\n"
+        )
+
+        self.report_text.insert(
+            "end",
+            f"Open Outages: {open_outages}\n"
+        )
+
+        self.report_text.insert(
+            "end",
+            f"Average Resolution Time: {average_text}\n\n"
+        )
+
+        self.report_text.insert(
+            "end",
+            "OUTAGES BY REGION / LOCATION\n"
+        )
+
+        self.report_text.insert(
+            "end",
+            "----------------------------\n"
+        )
+
+        if not regions:
+
+            self.report_text.insert(
+                "end",
+                "No outage data available.\n"
             )
 
         else:
-
-            average_text = (
-                "No resolved outages available."
-            )
-
-        report = ""
-
-        report += "GRIDCARE-LITE BASIC REPORT\n"
-        report += "=" * 60
-        report += "\n\n"
-
-        report += "OUTAGE SUMMARY\n"
-        report += "-" * 40
-        report += f"\nTotal Outages: {total}"
-        report += f"\nOpen Outages: {open_count}"
-        report += f"\nResolved Outages: {resolved_count}"
-        report += (
-            f"\nAverage Resolution Time: "
-            f"{average_text}"
-        )
-
-        report += "\n\nOUTAGES BY REGION\n"
-        report += "-" * 40
-
-        if regions:
 
             for region, count in regions:
 
-                report += (
-                    f"\n{region}: {count} outage(s)"
+                self.report_text.insert(
+                    "end",
+                    f"{region}: {count} outage(s)\n"
                 )
-
-        else:
-
-            report += "\nNo regional outage data."
-
-        report += "\n\nWORK ORDERS BY STATUS\n"
-        report += "-" * 40
-
-        if work_orders:
-
-            for status, count in work_orders:
-
-                report += (
-                    f"\n{status}: {count}"
-                )
-
-        else:
-
-            report += "\nNo work orders."
-
-        self.text.insert(
-            "1.0",
-            report
-        )
 
 
 # ============================================================
@@ -4153,13 +4462,13 @@ class ReportsWindow:
 
 def main():
 
-    # Make sure the existing database is compatible
-    # before opening the GUI.
-    setup_database()
+    prepare_database()
 
     root = tk.Tk()
 
-    LoginWindow(root)
+    LoginWindow(
+        root
+    )
 
     root.mainloop()
 
